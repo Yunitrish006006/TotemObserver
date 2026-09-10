@@ -1,0 +1,61 @@
+name: Migrate Observer GameTests
+
+on:
+  push:
+    branches:
+      - refactor/own-observer-gametests
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out TotemObserver migration branch
+        uses: actions/checkout@v4
+        with:
+          ref: refactor/own-observer-gametests
+          fetch-depth: 0
+
+      - name: Check out verified VanillaTweaks source
+        uses: actions/checkout@v4
+        with:
+          repository: Yunitrish006006/TotemVanillaTweaks
+          ref: 31680cfd117f622c6237079b2f5ffebf1ba1a729
+          path: .source/TotemVanillaTweaks
+          persist-credentials: false
+
+      - name: Move Observer GameTest ownership
+        shell: bash
+        run: bash .github/migrations/move-observer-gametests.sh
+
+      - name: Validate migrated source shape
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f src/gametest/resources/fabric.mod.json
+          test -f src/integrationGametest/resources/fabric.mod.json
+          test -f .github/workflows/observer-runtime-validation.yml
+          test -f .github/scripts/build-observer-integration-jars.sh
+          test -f .github/scripts/check-owned-observer-screens.sh
+          count="$(find src/gametest/java/dev/totem/observer/gametest -maxdepth 1 -type f -name 'Observer*.java' | wc -l)"
+          test "$count" -ge 20
+          ! grep -R -n 'dev\.totem\.vanillatweaks' src/gametest src/integrationGametest
+          jq -e '.id == "totem-observer-gametest" and (.entrypoints["fabric-client-gametest"] | length >= 20)' src/gametest/resources/fabric.mod.json >/dev/null
+          jq -e '.id == "totem-observer-integration-gametest"' src/integrationGametest/resources/fabric.mod.json >/dev/null
+
+      - name: Commit migrated validation ownership
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/migrate-observer-gametests.yml .github/migrations/move-observer-gametests.sh
+          rmdir .github/migrations 2>/dev/null || true
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --stat
+          git commit -m 'test: move Observer GameTest ownership'
+          git push origin HEAD:refactor/own-observer-gametests
