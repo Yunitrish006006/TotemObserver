@@ -61,6 +61,8 @@ jobs:
           ! grep -R -n 'dev\.totem\.vanillatweaks' src/main/java
           ! grep -R -n 'TotemVanillaTweaks' src/main/java
           ! grep -R -n 'dev\.totem\.observer\.observer' src/main/java
+          test "$(find src/test/java -name 'Observer*Test.java' | wc -l)" -ge 4
+          ! grep -R -n 'dev\.totem\.vanillatweaks' src/test/java
           grep -F 'PROTOCOL_NAMESPACE = "totem-vanilla-tweaks"' src/main/java/dev/totem/observer/TotemObserver.java
           grep -F '"java": ">=25"' src/main/resources/fabric.mod.json
           grep -F '"totem-core": ">=0.7.18 <0.8.0"' src/main/resources/fabric.mod.json
