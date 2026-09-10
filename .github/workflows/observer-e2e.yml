@@ -1,0 +1,116 @@
+name: Observer 3-JVM E2E
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  observer-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - name: Check out TotemObserver
+        uses: actions/checkout@v4
+
+      - name: Set up Java 25
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-disabled: true
+
+      - name: Check out pinned TotemCore
+        uses: actions/checkout@v4
+        with:
+          repository: Yunitrish006006/TotemCore
+          ref: f87cd10fe8aefce77925b9e75dad237f17f38966
+          path: .lockstep/TotemCore
+          persist-credentials: false
+
+      - name: Check out pinned TotemExcavation compile dependency
+        uses: actions/checkout@v4
+        with:
+          repository: Yunitrish006006/TotemExcavation
+          ref: f40b94fd5d9de8b47534343c76a95f62926d2b1b
+          path: .lockstep/TotemExcavation
+          persist-credentials: false
+
+      - name: Check out pinned TotemRemnant
+        uses: actions/checkout@v4
+        with:
+          repository: Yunitrish006006/TotemRemnant
+          ref: 1d89395f93d8ea817947db4653919a11355eb548
+          path: .lockstep/TotemRemnant
+          persist-credentials: false
+
+      - name: Check out pinned TotemAutomata
+        uses: actions/checkout@v4
+        with:
+          repository: Yunitrish006006/TotemAutomata
+          ref: cc4bdb022615faad73bc9e5c0ef6d52b9d0970e6
+          path: .lockstep/TotemAutomata
+          persist-credentials: false
+
+      - name: Check out pinned TotemNexus
+        uses: actions/checkout@v4
+        with:
+          repository: Yunitrish006006/TotemNexus
+          ref: e3f91a19790f9da85494b9ae1d5770dda12e0e43
+          path: .lockstep/TotemNexus
+          persist-credentials: false
+
+      - name: Check out pinned TotemVillagers
+        uses: actions/checkout@v4
+        with:
+          repository: Yunitrish006006/TotemVillagers
+          ref: 615f83c5c3534a40e6ae7a2a0713390512f8b64c
+          path: .lockstep/TotemVillagers
+          persist-credentials: false
+
+      - name: Check out pinned TotemLocksmith
+        uses: actions/checkout@v4
+        with:
+          repository: Yunitrish006006/TotemLocksmith
+          ref: 9e8e25d44887a33839dc2a3b92a424ca4b931e00
+          path: .lockstep/TotemLocksmith
+          persist-credentials: false
+
+      - name: Build pinned Observer owner modules
+        shell: bash
+        run: bash .github/scripts/build-observer-integration-jars.sh
+
+      - name: Enforce module-owned Observer screens
+        shell: bash
+        run: bash .github/scripts/check-owned-observer-screens.sh
+
+      - name: Run dedicated-server two-client Observer E2E
+        shell: bash
+        run: bash .github/scripts/run-observer-e2e.sh
+
+      - name: Upload Observer E2E evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: observer-three-jvm-e2e-evidence
+          path: |
+            build/e2e/*.log
+            build/e2e/results/**
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Enforce E2E extraction boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          ! grep -R -n 'dev\.totem\.vanillatweaks' src/e2e
+          jq -e '.id == "totem-observer-e2e" and .depends["totem-observer"] == "*" and (.depends["totem-vanilla-tweaks"] == null)' src/e2e/resources/fabric.mod.json >/dev/null

@@ -22,7 +22,17 @@ def observerIntegrationJars = [
                 .getOrElse('../TotemLocksmith/build/libs/totem-locksmith-0.1.10.jar'))
 ]
 
+def observerE2eResults = file("${buildDir}/e2e/results").absolutePath
+
 sourceSets {
+    e2e {
+        java.setSrcDirs(['src/e2e/java'])
+        resources.setSrcDirs(['src/e2e/resources'])
+        compileClasspath += sourceSets.main.output.classesDirs + configurations.compileClasspath
+        compileClasspath += files(observerIntegrationJars.values())
+        runtimeClasspath += output + sourceSets.main.output + configurations.runtimeClasspath
+        runtimeClasspath += files(observerIntegrationJars.values())
+    }
     integrationGametest {
         java.setSrcDirs(['src/integrationGametest/java'])
         resources.setSrcDirs(['src/integrationGametest/resources'])
@@ -38,9 +48,40 @@ sourceSets {
 loom {
     mods {
         'totem-observer' { sourceSet sourceSets.main }
+        'totem-observer-e2e' { sourceSet sourceSets.e2e }
         'totem-observer-integration-gametest' { sourceSet sourceSets.integrationGametest }
     }
     runs {
+        e2eServer {
+            server()
+            configName = 'Observer E2E Server'
+            runDir = 'build/e2e/server'
+            source = sourceSets.main
+            vmArg '-Dtotem.observer.e2e.enabled=true'
+            vmArg "-Dtotem.observer.e2e.results=${observerE2eResults}"
+        }
+        e2eTarget {
+            client()
+            configName = 'Observer E2E Target'
+            runDir = 'build/e2e/target'
+            source = sourceSets.main
+            vmArg '-Dtotem.observer.e2e.enabled=true'
+            vmArg '-Dtotem.observer.e2e.role=target'
+            vmArg "-Dtotem.observer.e2e.results=${observerE2eResults}"
+            programArg '--username'
+            programArg 'Target'
+        }
+        e2eObserver {
+            client()
+            configName = 'Observer E2E Observer'
+            runDir = 'build/e2e/observer'
+            source = sourceSets.main
+            vmArg '-Dtotem.observer.e2e.enabled=true'
+            vmArg '-Dtotem.observer.e2e.role=observer'
+            vmArg "-Dtotem.observer.e2e.results=${observerE2eResults}"
+            programArg '--username'
+            programArg 'Observer'
+        }
         integrationClientGametest {
             client()
             configName = 'Observer Cross-module Integration Client GameTest'
@@ -111,6 +152,105 @@ tasks.register('runProductionClientGameTest', net.fabricmc.loom.task.prod.Client
     jvmArgs.add('-Dfabric.client.gametest')
     jvmArgs.add('-Dfabric.client.gametest.disableNetworkSynchronizer=true')
     useXVFB = true
+}
+
+// A Loom run has exactly one primary SourceSet. E2E runs use main and append the test mod output.
+tasks.matching { task -> task.name in ["runE2eServer", "runE2eTarget", "runE2eObserver"] }.configureEach {
+    dependsOn(sourceSets.e2e.classesTaskName, sourceSets.e2e.processResourcesTaskName)
+    classpath(sourceSets.e2e.output)
+    classpath(files(observerIntegrationJars.values()))
+    doFirst {
+        observerIntegrationJars.each { module, jarFile ->
+            if (!jarFile.isFile()) throw new GradleException("Missing pinned Observer E2E JAR for ${module}: ${jarFile}")
+        }
+    }
+}
+
+def e2eLaunchInputsDir = providers.gradleProperty('e2eLaunchInputsDir')
+        .map { path -> file(path) }
+        .orElse(layout.buildDirectory.dir('e2e/launch').map { it.asFile })
+def e2eClientRunTasks = ["runE2eTarget", "runE2eObserver"].collect { taskName ->
+    tasks.named(taskName, net.fabricmc.loom.task.RunGameTask)
+}
+
+tasks.register('prepareE2eClientLaunchInputs') {
+    group = 'verification'
+    description = 'Writes fresh official-namespace E2E client launch.cfg and classpath argfiles.'
+    dependsOn(sourceSets.e2e.classesTaskName, sourceSets.e2e.processResourcesTaskName, 'configureClientLaunch')
+    outputs.upToDateWhen { false }
+
+    doLast {
+        File outputDir = e2eLaunchInputsDir.get()
+        outputDir.mkdirs()
+        File projectCacheDir = gradle.startParameter.projectCacheDir ?: file('.gradle')
+        File generatedLaunchConfig = new File(projectCacheDir, 'loom-cache/launch.cfg')
+        if (!generatedLaunchConfig.isFile()) {
+            throw new GradleException("configureClientLaunch did not create ${generatedLaunchConfig}")
+        }
+        String launchConfig = generatedLaunchConfig.getText('UTF-8')
+        if (!launchConfig.contains('fabric.defaultModDistributionNamespace=official')
+                || launchConfig.contains('fabric.defaultModDistributionNamespace=named')) {
+            throw new GradleException('E2E launch.cfg must use the official distribution namespace')
+        }
+        java.nio.file.Files.copy(generatedLaunchConfig.toPath(), new File(outputDir, 'launch.cfg').toPath(),
+                java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+
+        String expectedClasspath = null
+        e2eClientRunTasks.each { runTaskProvider ->
+            def runTask = runTaskProvider.get()
+            String classpath = runTask.classpath.files.collect { it.absolutePath }.join(File.pathSeparator)
+            String lowerClasspath = classpath.toLowerCase(Locale.ROOT)
+            if (classpath.isBlank()) throw new GradleException("${runTask.name} resolved an empty classpath")
+            if (lowerClasspath.contains('org.relativitymc') || lowerClasspath.contains('modern-yarn')) {
+                throw new GradleException("${runTask.name} resolved a stale mapped classpath")
+            }
+            if (!classpath.contains(sourceSets.main.output.classesDirs.singleFile.absolutePath)
+                    || !classpath.contains(sourceSets.e2e.output.classesDirs.singleFile.absolutePath)
+                    || !classpath.contains(totemCoreJar.absolutePath)) {
+                throw new GradleException("${runTask.name} is missing main, E2E, or pinned TotemCore classpath entries")
+            }
+            observerIntegrationJars.each { module, jarFile ->
+                if (!jarFile.isFile() || !classpath.contains(jarFile.absolutePath)) {
+                    throw new GradleException("${runTask.name} is missing pinned Observer owner JAR for ${module}: ${jarFile}")
+                }
+            }
+            if (expectedClasspath != null && expectedClasspath != classpath) {
+                throw new GradleException('Target and Observer direct-launch classpaths must be identical')
+            }
+            expectedClasspath = classpath
+            String escapedClasspath = classpath.replace('\\', '\\\\').replace('"', '\\"')
+            new File(outputDir, "${runTask.name}.args").setText("-classpath\n\"${escapedClasspath}\"\n", 'UTF-8')
+        }
+    }
+}
+
+tasks.matching { task -> task.name in ["runE2eTarget", "runE2eObserver"] }.configureEach {
+    doFirst {
+        String runDirName = name == 'runE2eTarget' ? 'target' : 'observer'
+        File dir = file("build/e2e/${runDirName}")
+        dir.mkdirs()
+        new File(dir, 'options.txt').text = '''onboardAccessibility:false
+skipMultiplayerWarning:true
+tutorialStep:none
+'''
+    }
+}
+
+tasks.named('runE2eServer').configure {
+    doFirst {
+        File dir = file('build/e2e/server')
+        dir.mkdirs()
+        new File(dir, 'eula.txt').text = 'eula=true\n'
+        new File(dir, 'server.properties').text = '''server-port=25570
+online-mode=false
+enforce-secure-profile=false
+spawn-protection=0
+view-distance=2
+simulation-distance=2
+max-players=4
+motd=Totem Observer E2E
+'''
+    }
 }
 
 java {
