@@ -125,7 +125,7 @@ JSON
   cp .source/gradlew .
   [[ ! -f .source/gradlew.bat ]] || cp .source/gradlew.bat .
   chmod +x gradlew
-  cp .source/LICENSE .
+  [[ ! -f .source/LICENSE ]] || cp .source/LICENSE .
 
   cat > settings.gradle <<'GRADLE'
 pluginManagement {
