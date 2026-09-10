@@ -1,0 +1,71 @@
+name: Build
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out TotemObserver
+        uses: actions/checkout@v4
+
+      - name: Check out pinned TotemCore
+        uses: actions/checkout@v4
+        with:
+          repository: Yunitrish006006/TotemCore
+          ref: f87cd10fe8aefce77925b9e75dad237f17f38966
+          path: .lockstep/TotemCore
+          persist-credentials: false
+
+      - name: Set up Java 25
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-disabled: true
+
+      - name: Build pinned TotemCore
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd .lockstep/TotemCore && ./gradlew assemble --no-daemon --stacktrace)
+
+      - name: Test and assemble TotemObserver
+        shell: bash
+        run: |
+          set -euo pipefail
+          core_version="$(sed -n 's/^mod_version=//p' .lockstep/TotemCore/gradle.properties)"
+          test "$core_version" = '0.7.18'
+          core_jar="${GITHUB_WORKSPACE}/.lockstep/TotemCore/build/libs/totem-core-${core_version}.jar"
+          ./gradlew -PtotemCoreJar="$core_jar" clean test assemble --no-daemon --stacktrace
+
+      - name: Enforce Observer extraction invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f build/libs/totem-observer-0.1.0.jar
+          test "$(sed -n 's/^mod_version=//p' gradle.properties)" = '0.1.0'
+          ! grep -R -n 'dev\.totem\.vanillatweaks' src/main/java
+          ! grep -R -n 'TotemVanillaTweaks' src/main/java
+          ! grep -R -n 'dev\.totem\.observer\.observer' src/main/java
+          grep -F 'PROTOCOL_NAMESPACE = "totem-vanilla-tweaks"' src/main/java/dev/totem/observer/TotemObserver.java
+          grep -F '"java": ">=25"' src/main/resources/fabric.mod.json
+          grep -F '"totem-core": ">=0.7.18 <0.8.0"' src/main/resources/fabric.mod.json
+          forbidden='Screenshot\.takeScreenshot|FrameChunk|FrameRelay|DynamicTexture|ObserverFrameRules|observer_frame_chunk|observer_frame_relay|observer_capture_control'
+          if grep -R -n -E "$forbidden" src/main; then
+            echo 'Framebuffer transport code entered TotemObserver.' >&2
+            exit 1
+          fi
