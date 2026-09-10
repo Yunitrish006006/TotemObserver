@@ -1,0 +1,73 @@
+name: Normalize Observer Runtime Package
+
+on:
+  push:
+    branches:
+      - feat/bootstrap-observer-runtime
+    paths:
+      - .github/workflows/normalize-observer-runtime.yml
+
+permissions:
+  contents: write
+
+jobs:
+  normalize-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/bootstrap-observer-runtime
+          fetch-depth: 0
+
+      - name: Normalize runtime package
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d src/main/java/dev/totem/observer/observer
+          mkdir -p src/main/java/dev/totem/observer/runtime
+          mv src/main/java/dev/totem/observer/observer/*.java src/main/java/dev/totem/observer/runtime/
+          rmdir src/main/java/dev/totem/observer/observer
+          grep -RIl 'dev\.totem\.observer\.observer' src/main/java | while read -r file; do
+            sed -i 's/dev\.totem\.observer\.observer/dev.totem.observer.runtime/g' "$file"
+          done
+          ! grep -R -n 'dev\.totem\.observer\.observer' src/main/java
+
+      - name: Check out pinned TotemCore
+        uses: actions/checkout@v4
+        with:
+          repository: Yunitrish006006/TotemCore
+          ref: f87cd10fe8aefce77925b9e75dad237f17f38966
+          path: .lockstep/TotemCore
+          persist-credentials: false
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-disabled: true
+
+      - name: Verify Java 25 build
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd .lockstep/TotemCore && ./gradlew assemble --no-daemon --stacktrace)
+          core_jar="${GITHUB_WORKSPACE}/.lockstep/TotemCore/build/libs/totem-core-0.7.18.jar"
+          ./gradlew -PtotemCoreJar="$core_jar" clean assemble --no-daemon --stacktrace
+
+      - name: Commit normalized package
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .lockstep build .gradle
+          rm -f .github/workflows/normalize-observer-runtime.yml
+          rmdir .github/workflows 2>/dev/null || true
+          rmdir .github 2>/dev/null || true
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'refactor: normalize Observer runtime package'
+          git push origin HEAD:feat/bootstrap-observer-runtime
