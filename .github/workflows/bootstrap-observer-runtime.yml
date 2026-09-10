@@ -1,4 +1,4 @@
-# bootstrap revision 3
+# bootstrap revision 4
 name: Bootstrap Observer Runtime
 
 on:
@@ -41,6 +41,9 @@ jobs:
       - name: Prepare extracted module
         run: bash .github/bootstrap-observer-runtime.sh prepare
 
+      - name: Extract Observer accessor mixins
+        run: bash .github/bootstrap-observer-accessors.sh
+
       - name: Set up Java 25
         uses: actions/setup-java@v5
         with:
@@ -63,4 +66,7 @@ jobs:
           ./gradlew -PtotemCoreJar="$core_jar" clean test assemble --no-daemon --stacktrace
 
       - name: Verify and commit extraction
-        run: bash .github/bootstrap-observer-runtime.sh verify-commit
+        shell: bash
+        run: |
+          rm -f .github/bootstrap-observer-accessors.sh
+          bash .github/bootstrap-observer-runtime.sh verify-commit
