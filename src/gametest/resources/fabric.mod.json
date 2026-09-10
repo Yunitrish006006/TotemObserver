@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "id": "totem-observer-gametest",
+  "version": "1.0.0",
+  "name": "TotemObserver GameTests",
+  "environment": "client",
+  "entrypoints": {
+    "fabric-client-gametest": [
+      "dev.totem.observer.gametest.ObserverUiClientGameTest",
+      "dev.totem.observer.gametest.ObserverMerchantClientGameTest",
+      "dev.totem.observer.gametest.ObserverAnvilClientGameTest",
+      "dev.totem.observer.gametest.ObserverEnchantingClientGameTest",
+      "dev.totem.observer.gametest.ObserverRemnantBackpackClientGameTest",
+      "dev.totem.observer.gametest.ObserverAutomataCopperGolemClientGameTest",
+      "dev.totem.observer.gametest.ObserverNexusClientGameTest",
+      "dev.totem.observer.gametest.ObserverVillagersWoodcutterClientGameTest",
+      "dev.totem.observer.gametest.ObserverBrewingClientGameTest",
+      "dev.totem.observer.gametest.ObserverSmithingClientGameTest",
+      "dev.totem.observer.gametest.ObserverStonecutterClientGameTest",
+      "dev.totem.observer.gametest.ObserverGrindstoneClientGameTest",
+      "dev.totem.observer.gametest.ObserverLoomClientGameTest",
+      "dev.totem.observer.gametest.ObserverCartographyClientGameTest",
+      "dev.totem.observer.gametest.ObserverBeaconClientGameTest",
+      "dev.totem.observer.gametest.ObserverSignClientGameTest",
+      "dev.totem.observer.gametest.ObserverCrafterClientGameTest",
+      "dev.totem.observer.gametest.ObserverNexusDeathNodeAdminClientGameTest",
+      "dev.totem.observer.gametest.ObserverLocksmithManagementClientGameTest",
+      "dev.totem.observer.gametest.ObserverPauseScreenClientGameTest",
+      "dev.totem.observer.gametest.ObserverAdvancementsClientGameTest",
+      "dev.totem.observer.gametest.ObserverStatsClientGameTest",
+      "dev.totem.observer.gametest.ObserverHorseClientGameTest",
+      "dev.totem.observer.gametest.ObserverUiNetworkLoopbackClientGameTest",
+      "dev.totem.observer.gametest.ObserverVanillaProductionSenderClientGameTest"
+    ]
+  },
+  "depends": {
+    "fabricloader": "*",
+    "fabric-api": "*",
+    "minecraft": "*",
+    "totem-core": "*",
+    "totem-observer": "*"
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "totem-observer-integration-gametest",
+  "version": "1.0.0",
+  "name": "TotemObserver Cross-module Integration GameTests",
+  "environment": "client",
+  "entrypoints": {
+    "fabric-client-gametest": [
+      "dev.totem.observer.client.ObserverCrossModuleProductionSenderClientGameTest"
+    ]
+  },
+  "depends": {
+    "fabricloader": "*",
+    "fabric-api": "*",
+    "minecraft": "*",
+    "totem-core": "*",
+    "totem-remnant": "*",
+    "totem-automata": "*",
+    "totem-nexus": "*",
+    "totem-villagers": "*",
+    "totem-locksmith": "*",
+    "totem-observer": "*"
+  }
+}
