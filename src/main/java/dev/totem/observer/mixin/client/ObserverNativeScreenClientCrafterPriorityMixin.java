@@ -1,0 +1,34 @@
+package dev.totem.observer.mixin.client;
+
+import dev.totem.observer.client.ObserverCrafterScreenClient;
+import dev.totem.observer.client.ObserverNativeClient;
+import dev.totem.observer.client.ObserverNativeScreenClient;
+import dev.totem.observer.network.ObserverCrafterScreenPayloads;
+import dev.totem.observer.network.ObserverNativeScreenPayloads;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.Screen;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+
+/** Gives Crafter semantics priority over generic container/metadata adapters. */
+@Mixin(value = ObserverNativeScreenClient.class, remap = false)
+public abstract class ObserverNativeScreenClientCrafterPriorityMixin {
+    @Shadow private static void closeTargetContainer(boolean canSend) { throw new AssertionError(); }
+    @Shadow private static void closeTargetFurnace(boolean canSend) { throw new AssertionError(); }
+
+    @Inject(method = "tickTarget", at = @At("HEAD"), cancellable = true)
+    private static void totem$preferCrafterFamily(Minecraft minecraft, CallbackInfo ci) {
+        if (!supportsCrafter(minecraft.gui.screen())) return;
+        closeTargetFurnace(ObserverNativeClient.targetSupportsScreen(ObserverNativeScreenPayloads.CAPABILITY_FURNACE));
+        closeTargetContainer(ObserverNativeClient.targetSupportsScreen(ObserverNativeScreenPayloads.CAPABILITY_CONTAINER_SLOTS));
+        ci.cancel();
+    }
+
+    private static boolean supportsCrafter(Screen screen) {
+        return ObserverNativeClient.targetSupportsScreen(ObserverCrafterScreenPayloads.CAPABILITY)
+                && ObserverCrafterScreenClient.isCrafterScreen(screen);
+    }
+}

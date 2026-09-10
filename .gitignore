@@ -1,0 +1,9 @@
+.gradle/
+build/
+out/
+run/
+.lockstep/
+.idea/
+.vscode/
+*.log
+.DS_Store
