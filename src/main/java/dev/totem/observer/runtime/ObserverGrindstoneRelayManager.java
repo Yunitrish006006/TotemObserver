@@ -1,6 +1,6 @@
-package dev.totem.observer.observer;
+package dev.totem.observer.runtime;
 
-import dev.totem.observer.network.ObserverBeaconScreenPayloads;
+import dev.totem.observer.network.ObserverGrindstoneScreenPayloads;
 import dev.totem.observer.network.ObserverNativeScreenPayloads;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.server.MinecraftServer;
@@ -10,22 +10,18 @@ import java.lang.reflect.Field;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 
-/** Relay and validation for Beacon semantic state. */
-public final class ObserverBeaconRelayManager {
-    private static final int VANILLA_SLOT_COUNT = 37;
-    private static final Set<String> EFFECTS = Set.of(
-            "minecraft:speed", "minecraft:haste", "minecraft:resistance",
-            "minecraft:jump_boost", "minecraft:strength", "minecraft:regeneration");
+/** Relay and validation for Grindstone semantics. */
+public final class ObserverGrindstoneRelayManager {
+    private static final int VANILLA_SLOT_COUNT = 39;
     private static final Map<UUID, Long> LAST_SEQUENCE_BY_TARGET = new HashMap<>();
     private static final Field TARGET_BY_OBSERVER = staticField("TARGET_BY_OBSERVER");
     private static final Field SCREEN_CAPABILITIES_BY_OBSERVER = staticField("SCREEN_CAPABILITIES_BY_OBSERVER");
 
-    private ObserverBeaconRelayManager() {}
+    private ObserverGrindstoneRelayManager() {}
 
-    public static void acceptState(ServerPlayer target, ObserverBeaconScreenPayloads.BeaconState payload) {
+    public static void acceptState(ServerPlayer target, ObserverGrindstoneScreenPayloads.GrindstoneState payload) {
         if (!valid(payload)) return;
         UUID targetId = target.getUUID();
         if (!hasCapableObserver(targetId)) return;
@@ -33,15 +29,15 @@ public final class ObserverBeaconRelayManager {
         if (payload.sequence() <= last) return;
         LAST_SEQUENCE_BY_TARGET.put(targetId, payload.sequence());
         MinecraftServer server = target.level().getServer();
-        var relay = ObserverBeaconScreenPayloads.relay(targetId, payload);
+        var relay = ObserverGrindstoneScreenPayloads.relay(targetId, payload);
         for (Map.Entry<UUID, UUID> entry : targetByObserver().entrySet()) {
             if (!targetId.equals(entry.getValue())) continue;
             UUID observerId = entry.getKey();
             if (!ObserverNativeScreenPayloads.supports(capabilitiesByObserver().getOrDefault(observerId, 0L),
-                    ObserverBeaconScreenPayloads.CAPABILITY)) continue;
+                    ObserverGrindstoneScreenPayloads.CAPABILITY)) continue;
             ServerPlayer observer = server.getPlayerList().getPlayer(observerId);
             if (observer != null && observer.isSpectator()
-                    && ServerPlayNetworking.canSend(observer, ObserverBeaconScreenPayloads.BeaconRelay.TYPE)) {
+                    && ServerPlayNetworking.canSend(observer, ObserverGrindstoneScreenPayloads.GrindstoneRelay.TYPE)) {
                 ServerPlayNetworking.send(observer, relay);
             }
         }
@@ -52,27 +48,24 @@ public final class ObserverBeaconRelayManager {
     private static boolean hasCapableObserver(UUID targetId) {
         for (Map.Entry<UUID, UUID> entry : targetByObserver().entrySet()) {
             if (targetId.equals(entry.getValue()) && ObserverNativeScreenPayloads.supports(
-                    capabilitiesByObserver().getOrDefault(entry.getKey(), 0L), ObserverBeaconScreenPayloads.CAPABILITY)) return true;
+                    capabilitiesByObserver().getOrDefault(entry.getKey(), 0L), ObserverGrindstoneScreenPayloads.CAPABILITY)) return true;
         }
         return false;
     }
 
-    private static boolean valid(ObserverBeaconScreenPayloads.BeaconState p) {
-        if (p.protocolVersion() != ObserverBeaconScreenPayloads.PROTOCOL_VERSION || p.sequence() < 0L
-                || !ObserverBeaconScreenPayloads.FAMILY_ID.equals(p.familyId())) return false;
-        if (!p.open()) return p.levels() == 0 && p.primaryEffectId().isEmpty() && p.secondaryEffectId().isEmpty()
-                && !p.paymentPresent() && !p.canConfirm() && p.slots().isEmpty();
-        if (!ObserverBeaconScreenPayloads.SCREEN_CLASS.equals(p.screenClass())
-                || p.levels() < 0 || p.levels() > 4 || p.slots().size() != VANILLA_SLOT_COUNT
-                || !validSlots(p.slots()) || !validEffect(p.primaryEffectId()) || !validEffect(p.secondaryEffectId())) return false;
-        boolean payment = slotPresent(p.slots(), 0);
-        if (payment != p.paymentPresent()) return false;
-        boolean expectedConfirm = p.levels() > 0 && payment && !p.primaryEffectId().isBlank();
-        return p.canConfirm() == expectedConfirm;
-    }
-
-    private static boolean validEffect(String id) {
-        return id != null && (id.isBlank() || EFFECTS.contains(id));
+    private static boolean valid(ObserverGrindstoneScreenPayloads.GrindstoneState p) {
+        if (p.protocolVersion() != ObserverGrindstoneScreenPayloads.PROTOCOL_VERSION || p.sequence() < 0L
+                || !ObserverGrindstoneScreenPayloads.FAMILY_ID.equals(p.familyId())) return false;
+        if (!p.open()) return !p.primaryInputPresent() && !p.secondaryInputPresent() && !p.resultAvailable()
+                && !p.invalidCombination() && p.slots().isEmpty();
+        if (!ObserverGrindstoneScreenPayloads.SCREEN_CLASS.equals(p.screenClass())
+                || p.slots().size() != VANILLA_SLOT_COUNT || !validSlots(p.slots())) return false;
+        boolean primary = slotPresent(p.slots(), 0);
+        boolean secondary = slotPresent(p.slots(), 1);
+        boolean result = slotPresent(p.slots(), 2);
+        boolean invalid = primary && secondary && !result;
+        return p.primaryInputPresent() == primary && p.secondaryInputPresent() == secondary
+                && p.resultAvailable() == result && p.invalidCombination() == invalid;
     }
 
     private static boolean slotPresent(List<ObserverNativeScreenPayloads.SlotState> slots, int index) {

@@ -1,4 +1,4 @@
-package dev.totem.observer.observer;
+package dev.totem.observer.runtime;
 
 import dev.totem.observer.network.ObserverAnvilScreenPayloads;
 import dev.totem.observer.network.ObserverBookScreenPayloads;

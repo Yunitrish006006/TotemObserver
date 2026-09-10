@@ -1,4 +1,4 @@
-package dev.totem.observer.observer;
+package dev.totem.observer.runtime;
 
 import dev.totem.observer.client.ObserverAdvancementsScreenClient;
 import dev.totem.observer.client.ObserverBeaconScreenClient;

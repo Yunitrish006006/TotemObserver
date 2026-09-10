@@ -1,7 +1,7 @@
-package dev.totem.observer.observer;
+package dev.totem.observer.runtime;
 
-import dev.totem.observer.network.ObserverLoomScreenPayloads;
 import dev.totem.observer.network.ObserverNativeScreenPayloads;
+import dev.totem.observer.network.ObserverStonecutterScreenPayloads;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
@@ -12,16 +12,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-/** Relay and validation for Loom semantic state. */
-public final class ObserverLoomRelayManager {
-    private static final int VANILLA_SLOT_COUNT = 40;
+/** Relay and validation for Stonecutter selector semantics. */
+public final class ObserverStonecutterRelayManager {
+    private static final int VANILLA_SLOT_COUNT = 38;
     private static final Map<UUID, Long> LAST_SEQUENCE_BY_TARGET = new HashMap<>();
     private static final Field TARGET_BY_OBSERVER = staticField("TARGET_BY_OBSERVER");
     private static final Field SCREEN_CAPABILITIES_BY_OBSERVER = staticField("SCREEN_CAPABILITIES_BY_OBSERVER");
+    private ObserverStonecutterRelayManager() {}
 
-    private ObserverLoomRelayManager() {}
-
-    public static void acceptState(ServerPlayer target, ObserverLoomScreenPayloads.LoomState payload) {
+    public static void acceptState(ServerPlayer target, ObserverStonecutterScreenPayloads.StonecutterState payload) {
         if (!valid(payload)) return;
         UUID targetId = target.getUUID();
         if (!hasCapableObserver(targetId)) return;
@@ -29,15 +28,15 @@ public final class ObserverLoomRelayManager {
         if (payload.sequence() <= last) return;
         LAST_SEQUENCE_BY_TARGET.put(targetId, payload.sequence());
         MinecraftServer server = target.level().getServer();
-        var relay = ObserverLoomScreenPayloads.relay(targetId, payload);
+        var relay = ObserverStonecutterScreenPayloads.relay(targetId, payload);
         for (Map.Entry<UUID, UUID> entry : targetByObserver().entrySet()) {
             if (!targetId.equals(entry.getValue())) continue;
             UUID observerId = entry.getKey();
             if (!ObserverNativeScreenPayloads.supports(capabilitiesByObserver().getOrDefault(observerId, 0L),
-                    ObserverLoomScreenPayloads.CAPABILITY)) continue;
+                    ObserverStonecutterScreenPayloads.CAPABILITY)) continue;
             ServerPlayer observer = server.getPlayerList().getPlayer(observerId);
             if (observer != null && observer.isSpectator()
-                    && ServerPlayNetworking.canSend(observer, ObserverLoomScreenPayloads.LoomRelay.TYPE)) {
+                    && ServerPlayNetworking.canSend(observer, ObserverStonecutterScreenPayloads.StonecutterRelay.TYPE)) {
                 ServerPlayNetworking.send(observer, relay);
             }
         }
@@ -48,40 +47,47 @@ public final class ObserverLoomRelayManager {
     private static boolean hasCapableObserver(UUID targetId) {
         for (Map.Entry<UUID, UUID> entry : targetByObserver().entrySet()) {
             if (targetId.equals(entry.getValue()) && ObserverNativeScreenPayloads.supports(
-                    capabilitiesByObserver().getOrDefault(entry.getKey(), 0L), ObserverLoomScreenPayloads.CAPABILITY)) return true;
+                    capabilitiesByObserver().getOrDefault(entry.getKey(), 0L), ObserverStonecutterScreenPayloads.CAPABILITY)) return true;
         }
         return false;
     }
 
-    private static boolean valid(ObserverLoomScreenPayloads.LoomState p) {
-        if (p.protocolVersion() != ObserverLoomScreenPayloads.PROTOCOL_VERSION || p.sequence() < 0L
-                || !ObserverLoomScreenPayloads.FAMILY_ID.equals(p.familyId())) return false;
-        if (!p.open()) return p.selectedPatternIndex() == -1 && p.startRow() == 0 && !p.displayPatterns()
-                && p.scrollOffset() == 0.0F && !p.hasMaxPatterns() && !p.resultAvailable()
-                && p.resultBaseColorId() == -1 && p.patterns().isEmpty() && p.resultLayers().isEmpty()
-                && p.slots().isEmpty();
-        if (!ObserverLoomScreenPayloads.SCREEN_CLASS.equals(p.screenClass())
-                || p.patterns().size() > ObserverLoomScreenPayloads.MAX_PATTERNS
-                || p.resultLayers().size() > ObserverLoomScreenPayloads.MAX_BANNER_LAYERS
+    private static boolean valid(ObserverStonecutterScreenPayloads.StonecutterState p) {
+        if (p.protocolVersion() != ObserverStonecutterScreenPayloads.PROTOCOL_VERSION || p.sequence() < 0L
+                || !ObserverStonecutterScreenPayloads.FAMILY_ID.equals(p.familyId())) return false;
+        if (!p.open()) return p.selectedRecipeIndex() == -1 && p.recipeCount() == 0 && !p.hasInputItem()
+                && p.startIndex() == 0 && p.scrollOffset() == 0.0F && !p.displayRecipes()
+                && !p.resultAvailable() && p.recipes().isEmpty() && p.slots().isEmpty();
+        if (!ObserverStonecutterScreenPayloads.SCREEN_CLASS.equals(p.screenClass())
+                || p.recipeCount() < 0 || p.recipeCount() > ObserverStonecutterScreenPayloads.MAX_RECIPES
+                || p.recipes().size() != p.recipeCount()
                 || !Float.isFinite(p.scrollOffset()) || p.scrollOffset() < 0.0F || p.scrollOffset() > 1.001F
-                || p.slots().size() != VANILLA_SLOT_COUNT || !validSlots(p.slots())) return false;
-        for (var pattern : p.patterns()) {
-            if (pattern == null || pattern.registryId() == null || pattern.registryId().length() > 256
-                    || !validIdentifier(pattern.assetId())) return false;
+                || p.displayRecipes() != p.hasInputItem() || p.slots().size() != VANILLA_SLOT_COUNT) return false;
+        for (int i = 0; i < p.recipes().size(); i++) {
+            var recipe = p.recipes().get(i);
+            if (recipe == null || recipe.index() != i || recipe.recipeId() == null || recipe.recipeId().length() > 256
+                    || (!recipe.recipeId().isBlank() && !validIdentifier(recipe.recipeId()))
+                    || !validIdentifier(recipe.outputItemId()) || recipe.outputCount() <= 0
+                    || recipe.outputCount() > 127 || recipe.outputDamage() < 0) return false;
         }
-        for (var layer : p.resultLayers()) {
-            if (layer == null || !validIdentifier(layer.assetId())
-                    || layer.dyeColorId() < 0 || layer.dyeColorId() > 15) return false;
+        int offscreenRows = Math.max(0, Math.ceilDiv(p.recipeCount(), 4) - 3);
+        int expectedStart = offscreenRows == 0 ? 0 : (int) (p.scrollOffset() * offscreenRows + 0.5F) * 4;
+        if (p.startIndex() != expectedStart || p.startIndex() < 0
+                || p.startIndex() > Math.max(0, offscreenRows * 4)) return false;
+        if (p.recipeCount() == 0) {
+            if (p.selectedRecipeIndex() != -1 || p.resultAvailable()) return false;
+        } else {
+            if (p.selectedRecipeIndex() < -1 || p.selectedRecipeIndex() >= p.recipeCount()) return false;
+            if (p.selectedRecipeIndex() == -1 && p.resultAvailable()) return false;
         }
-        if (p.selectedPatternIndex() < -1 || p.selectedPatternIndex() >= p.patterns().size()) return false;
-        int totalRows = Math.ceilDiv(p.patterns().size(), 4);
-        int maxStartRow = Math.max(0, totalRows - 4);
-        if (p.startRow() < 0 || p.startRow() > maxStartRow) return false;
-        if (maxStartRow == 0 && (p.startRow() != 0 || p.scrollOffset() != 0.0F)) return false;
-        if (p.resultAvailable()) {
-            if (p.resultBaseColorId() < 0 || p.resultBaseColorId() > 15 || p.hasMaxPatterns()) return false;
-        } else if (p.resultBaseColorId() != -1 || !p.resultLayers().isEmpty()) return false;
-        return p.resultAvailable() == slotPresentAtMenuOrdinal(p.slots(), 3);
+        return p.resultAvailable() == slotPresentAtMenuOrdinal(p.slots(), 1) && validSlots(p.slots());
+    }
+
+    private static boolean slotPresentAtMenuOrdinal(
+            List<ObserverNativeScreenPayloads.SlotState> slots, int ordinal) {
+        if (ordinal < 0 || ordinal >= slots.size()) return false;
+        var slot = slots.get(ordinal);
+        return slot.count() > 0 && !slot.itemId().isBlank();
     }
 
     private static boolean validIdentifier(String value) {
@@ -92,13 +98,6 @@ public final class ObserverLoomRelayManager {
         } catch (RuntimeException error) {
             return false;
         }
-    }
-
-    private static boolean slotPresentAtMenuOrdinal(
-            List<ObserverNativeScreenPayloads.SlotState> slots, int ordinal) {
-        if (ordinal < 0 || ordinal >= slots.size()) return false;
-        var slot = slots.get(ordinal);
-        return slot.count() > 0 && !slot.itemId().isBlank();
     }
 
     private static boolean validSlots(List<ObserverNativeScreenPayloads.SlotState> slots) {

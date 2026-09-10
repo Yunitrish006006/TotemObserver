@@ -1,6 +1,6 @@
-package dev.totem.observer.observer;
+package dev.totem.observer.runtime;
 
-import dev.totem.observer.network.ObserverGrindstoneScreenPayloads;
+import dev.totem.observer.network.ObserverCrafterScreenPayloads;
 import dev.totem.observer.network.ObserverNativeScreenPayloads;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.server.MinecraftServer;
@@ -12,16 +12,17 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-/** Relay and validation for Grindstone semantics. */
-public final class ObserverGrindstoneRelayManager {
-    private static final int VANILLA_SLOT_COUNT = 39;
+/** Relay and validation for Crafter semantic state. */
+public final class ObserverCrafterRelayManager {
+    private static final int VANILLA_SLOT_COUNT = 46;
+    private static final int GRID_MASK = 0x1FF;
     private static final Map<UUID, Long> LAST_SEQUENCE_BY_TARGET = new HashMap<>();
     private static final Field TARGET_BY_OBSERVER = staticField("TARGET_BY_OBSERVER");
     private static final Field SCREEN_CAPABILITIES_BY_OBSERVER = staticField("SCREEN_CAPABILITIES_BY_OBSERVER");
 
-    private ObserverGrindstoneRelayManager() {}
+    private ObserverCrafterRelayManager() {}
 
-    public static void acceptState(ServerPlayer target, ObserverGrindstoneScreenPayloads.GrindstoneState payload) {
+    public static void acceptState(ServerPlayer target, ObserverCrafterScreenPayloads.CrafterState payload) {
         if (!valid(payload)) return;
         UUID targetId = target.getUUID();
         if (!hasCapableObserver(targetId)) return;
@@ -29,15 +30,15 @@ public final class ObserverGrindstoneRelayManager {
         if (payload.sequence() <= last) return;
         LAST_SEQUENCE_BY_TARGET.put(targetId, payload.sequence());
         MinecraftServer server = target.level().getServer();
-        var relay = ObserverGrindstoneScreenPayloads.relay(targetId, payload);
+        var relay = ObserverCrafterScreenPayloads.relay(targetId, payload);
         for (Map.Entry<UUID, UUID> entry : targetByObserver().entrySet()) {
             if (!targetId.equals(entry.getValue())) continue;
             UUID observerId = entry.getKey();
             if (!ObserverNativeScreenPayloads.supports(capabilitiesByObserver().getOrDefault(observerId, 0L),
-                    ObserverGrindstoneScreenPayloads.CAPABILITY)) continue;
+                    ObserverCrafterScreenPayloads.CAPABILITY)) continue;
             ServerPlayer observer = server.getPlayerList().getPlayer(observerId);
             if (observer != null && observer.isSpectator()
-                    && ServerPlayNetworking.canSend(observer, ObserverGrindstoneScreenPayloads.GrindstoneRelay.TYPE)) {
+                    && ServerPlayNetworking.canSend(observer, ObserverCrafterScreenPayloads.CrafterRelay.TYPE)) {
                 ServerPlayNetworking.send(observer, relay);
             }
         }
@@ -48,24 +49,22 @@ public final class ObserverGrindstoneRelayManager {
     private static boolean hasCapableObserver(UUID targetId) {
         for (Map.Entry<UUID, UUID> entry : targetByObserver().entrySet()) {
             if (targetId.equals(entry.getValue()) && ObserverNativeScreenPayloads.supports(
-                    capabilitiesByObserver().getOrDefault(entry.getKey(), 0L), ObserverGrindstoneScreenPayloads.CAPABILITY)) return true;
+                    capabilitiesByObserver().getOrDefault(entry.getKey(), 0L), ObserverCrafterScreenPayloads.CAPABILITY)) return true;
         }
         return false;
     }
 
-    private static boolean valid(ObserverGrindstoneScreenPayloads.GrindstoneState p) {
-        if (p.protocolVersion() != ObserverGrindstoneScreenPayloads.PROTOCOL_VERSION || p.sequence() < 0L
-                || !ObserverGrindstoneScreenPayloads.FAMILY_ID.equals(p.familyId())) return false;
-        if (!p.open()) return !p.primaryInputPresent() && !p.secondaryInputPresent() && !p.resultAvailable()
-                && !p.invalidCombination() && p.slots().isEmpty();
-        if (!ObserverGrindstoneScreenPayloads.SCREEN_CLASS.equals(p.screenClass())
+    private static boolean valid(ObserverCrafterScreenPayloads.CrafterState p) {
+        if (p.protocolVersion() != ObserverCrafterScreenPayloads.PROTOCOL_VERSION || p.sequence() < 0L
+                || !ObserverCrafterScreenPayloads.FAMILY_ID.equals(p.familyId())) return false;
+        if (!p.open()) return !p.powered() && p.disabledMask() == 0 && p.occupiedInputSlots() == 0 && p.slots().isEmpty();
+        if (!ObserverCrafterScreenPayloads.SCREEN_CLASS.equals(p.screenClass())
+                || p.disabledMask() < 0 || (p.disabledMask() & ~GRID_MASK) != 0
+                || p.occupiedInputSlots() < 0 || p.occupiedInputSlots() > 9
                 || p.slots().size() != VANILLA_SLOT_COUNT || !validSlots(p.slots())) return false;
-        boolean primary = slotPresent(p.slots(), 0);
-        boolean secondary = slotPresent(p.slots(), 1);
-        boolean result = slotPresent(p.slots(), 2);
-        boolean invalid = primary && secondary && !result;
-        return p.primaryInputPresent() == primary && p.secondaryInputPresent() == secondary
-                && p.resultAvailable() == result && p.invalidCombination() == invalid;
+        int occupied = 0;
+        for (int i = 0; i < 9; i++) if (slotPresent(p.slots(), i)) occupied++;
+        return occupied == p.occupiedInputSlots();
     }
 
     private static boolean slotPresent(List<ObserverNativeScreenPayloads.SlotState> slots, int index) {

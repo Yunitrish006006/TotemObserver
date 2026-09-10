@@ -1,6 +1,6 @@
 package dev.totem.observer;
 
-import dev.totem.observer.observer.ObserverServerRuntime;
+import dev.totem.observer.runtime.ObserverServerRuntime;
 import net.fabricmc.api.ModInitializer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

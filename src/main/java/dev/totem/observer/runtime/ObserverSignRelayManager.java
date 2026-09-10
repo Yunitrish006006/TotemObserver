@@ -1,25 +1,29 @@
-package dev.totem.observer.observer;
+package dev.totem.observer.runtime;
 
 import dev.totem.observer.network.ObserverNativeScreenPayloads;
-import dev.totem.observer.network.ObserverSmithingScreenPayloads;
+import dev.totem.observer.network.ObserverSignScreenPayloads;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 
 import java.lang.reflect.Field;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
-/** Relay and validation for Smithing Table semantics. */
-public final class ObserverSmithingRelayManager {
+/** Relay and validation for Sign editor semantic state. */
+public final class ObserverSignRelayManager {
+    private static final Set<String> COLORS = Set.of(
+            "white", "orange", "magenta", "light_blue", "yellow", "lime", "pink", "gray",
+            "light_gray", "cyan", "purple", "blue", "brown", "green", "red", "black");
     private static final Map<UUID, Long> LAST_SEQUENCE_BY_TARGET = new HashMap<>();
     private static final Field TARGET_BY_OBSERVER = staticField("TARGET_BY_OBSERVER");
     private static final Field SCREEN_CAPABILITIES_BY_OBSERVER = staticField("SCREEN_CAPABILITIES_BY_OBSERVER");
-    private ObserverSmithingRelayManager() {}
 
-    public static void acceptState(ServerPlayer target, ObserverSmithingScreenPayloads.SmithingState payload) {
+    private ObserverSignRelayManager() {}
+
+    public static void acceptState(ServerPlayer target, ObserverSignScreenPayloads.SignState payload) {
         if (!valid(payload)) return;
         UUID targetId = target.getUUID();
         if (!hasCapableObserver(targetId)) return;
@@ -27,15 +31,15 @@ public final class ObserverSmithingRelayManager {
         if (payload.sequence() <= last) return;
         LAST_SEQUENCE_BY_TARGET.put(targetId, payload.sequence());
         MinecraftServer server = target.level().getServer();
-        var relay = ObserverSmithingScreenPayloads.relay(targetId, payload);
+        var relay = ObserverSignScreenPayloads.relay(targetId, payload);
         for (Map.Entry<UUID, UUID> entry : targetByObserver().entrySet()) {
             if (!targetId.equals(entry.getValue())) continue;
             UUID observerId = entry.getKey();
-            long caps = capabilitiesByObserver().getOrDefault(observerId, 0L);
-            if (!ObserverNativeScreenPayloads.supports(caps, ObserverSmithingScreenPayloads.CAPABILITY)) continue;
+            if (!ObserverNativeScreenPayloads.supports(capabilitiesByObserver().getOrDefault(observerId, 0L),
+                    ObserverSignScreenPayloads.CAPABILITY)) continue;
             ServerPlayer observer = server.getPlayerList().getPlayer(observerId);
             if (observer != null && observer.isSpectator()
-                    && ServerPlayNetworking.canSend(observer, ObserverSmithingScreenPayloads.SmithingRelay.TYPE)) {
+                    && ServerPlayNetworking.canSend(observer, ObserverSignScreenPayloads.SignRelay.TYPE)) {
                 ServerPlayNetworking.send(observer, relay);
             }
         }
@@ -45,27 +49,23 @@ public final class ObserverSmithingRelayManager {
 
     private static boolean hasCapableObserver(UUID targetId) {
         for (Map.Entry<UUID, UUID> entry : targetByObserver().entrySet()) {
-            if (!targetId.equals(entry.getValue())) continue;
-            if (ObserverNativeScreenPayloads.supports(capabilitiesByObserver().getOrDefault(entry.getKey(), 0L),
-                    ObserverSmithingScreenPayloads.CAPABILITY)) return true;
+            if (targetId.equals(entry.getValue()) && ObserverNativeScreenPayloads.supports(
+                    capabilitiesByObserver().getOrDefault(entry.getKey(), 0L), ObserverSignScreenPayloads.CAPABILITY)) return true;
         }
         return false;
     }
 
-    private static boolean valid(ObserverSmithingScreenPayloads.SmithingState p) {
-        if (p.protocolVersion() != ObserverSmithingScreenPayloads.PROTOCOL_VERSION || p.sequence() < 0L
-                || !ObserverSmithingScreenPayloads.FAMILY_ID.equals(p.familyId())) return false;
-        if (!p.open()) return !p.recipeError() && !p.resultAvailable() && p.slots().isEmpty();
-        if (!ObserverSmithingScreenPayloads.SCREEN_CLASS.equals(p.screenClass())) return false;
-        return validSlots(p.slots());
-    }
-
-    private static boolean validSlots(List<ObserverNativeScreenPayloads.SlotState> slots) {
-        if (slots.size() > ObserverNativeScreenPayloads.MAX_SLOTS) return false;
-        for (var slot : slots) {
-            if (slot.index() < 0 || slot.x() < -64 || slot.x() > 512 || slot.y() < -64 || slot.y() > 512
-                    || slot.count() < 0 || slot.count() > 127 || slot.damage() < 0) return false;
-        }
+    private static boolean valid(ObserverSignScreenPayloads.SignState p) {
+        if (p.protocolVersion() != ObserverSignScreenPayloads.PROTOCOL_VERSION || p.sequence() < 0L
+                || !ObserverSignScreenPayloads.FAMILY_ID.equals(p.familyId())) return false;
+        if (!p.open()) return p.screenClass().isEmpty() && p.variant().isEmpty() && p.lines().isEmpty()
+                && p.currentLine() == 0 && p.color().isEmpty() && !p.glowing();
+        boolean normal = ObserverSignScreenPayloads.SIGN_SCREEN_CLASS.equals(p.screenClass()) && "sign".equals(p.variant());
+        boolean hanging = ObserverSignScreenPayloads.HANGING_SIGN_SCREEN_CLASS.equals(p.screenClass())
+                && "hanging_sign".equals(p.variant());
+        if ((!normal && !hanging) || p.currentLine() < 0 || p.currentLine() >= ObserverSignScreenPayloads.LINE_COUNT
+                || p.lines().size() != ObserverSignScreenPayloads.LINE_COUNT || !COLORS.contains(p.color())) return false;
+        for (String line : p.lines()) if (line == null || line.length() > 384) return false;
         return true;
     }
 

@@ -1,4 +1,4 @@
-package dev.totem.observer.observer;
+package dev.totem.observer.runtime;
 
 import dev.totem.core.api.v1.client.observer.ObserverScreenSnapshot;
 import dev.totem.observer.network.ObserverOwnedProviderPolicy;

@@ -1,4 +1,4 @@
-package dev.totem.observer.observer;
+package dev.totem.observer.runtime;
 
 import com.mojang.brigadier.CommandDispatcher;
 import dev.totem.observer.network.ObserverPayloads;

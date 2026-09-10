@@ -1,4 +1,4 @@
-package dev.totem.observer.observer;
+package dev.totem.observer.runtime;
 
 /**
  * Single server-side bootstrap seam for the Observer subsystem.

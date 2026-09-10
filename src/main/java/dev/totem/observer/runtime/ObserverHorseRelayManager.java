@@ -1,4 +1,4 @@
-package dev.totem.observer.observer;
+package dev.totem.observer.runtime;
 
 import dev.totem.observer.network.ObserverHorseScreenPayloads;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;

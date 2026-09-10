@@ -1,7 +1,7 @@
-package dev.totem.observer.observer;
+package dev.totem.observer.runtime;
 
-import dev.totem.observer.network.ObserverBrewingScreenPayloads;
 import dev.totem.observer.network.ObserverNativeScreenPayloads;
+import dev.totem.observer.network.ObserverVillagersWoodcutterPayloads;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
@@ -12,15 +12,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-/** Relay and validation for Brewing Stand screen semantics. */
-public final class ObserverBrewingRelayManager {
+/** Optional-module relay for TotemVillagers Woodcutter screen semantics. */
+public final class ObserverVillagersWoodcutterRelayManager {
     private static final Map<UUID, Long> LAST_SEQUENCE_BY_TARGET = new HashMap<>();
     private static final Field TARGET_BY_OBSERVER = staticField("TARGET_BY_OBSERVER");
     private static final Field SCREEN_CAPABILITIES_BY_OBSERVER = staticField("SCREEN_CAPABILITIES_BY_OBSERVER");
 
-    private ObserverBrewingRelayManager() {}
+    private ObserverVillagersWoodcutterRelayManager() {}
 
-    public static void acceptState(ServerPlayer target, ObserverBrewingScreenPayloads.BrewingState payload) {
+    public static void acceptState(ServerPlayer target, ObserverVillagersWoodcutterPayloads.WoodcutterState payload) {
         if (!valid(payload)) return;
         UUID targetId = target.getUUID();
         if (!hasCapableObserver(targetId)) return;
@@ -29,15 +29,15 @@ public final class ObserverBrewingRelayManager {
         LAST_SEQUENCE_BY_TARGET.put(targetId, payload.sequence());
 
         MinecraftServer server = target.level().getServer();
-        var relay = ObserverBrewingScreenPayloads.relay(targetId, payload);
+        var relay = ObserverVillagersWoodcutterPayloads.relay(targetId, payload);
         for (Map.Entry<UUID, UUID> entry : targetByObserver().entrySet()) {
             if (!targetId.equals(entry.getValue())) continue;
             UUID observerId = entry.getKey();
             long capabilities = capabilitiesByObserver().getOrDefault(observerId, 0L);
-            if (!ObserverNativeScreenPayloads.supports(capabilities, ObserverBrewingScreenPayloads.CAPABILITY)) continue;
+            if (!ObserverNativeScreenPayloads.supports(capabilities, ObserverVillagersWoodcutterPayloads.CAPABILITY)) continue;
             ServerPlayer observer = server.getPlayerList().getPlayer(observerId);
             if (observer != null && observer.isSpectator()
-                    && ServerPlayNetworking.canSend(observer, ObserverBrewingScreenPayloads.BrewingRelay.TYPE)) {
+                    && ServerPlayNetworking.canSend(observer, ObserverVillagersWoodcutterPayloads.WoodcutterRelay.TYPE)) {
                 ServerPlayNetworking.send(observer, relay);
             }
         }
@@ -51,20 +51,30 @@ public final class ObserverBrewingRelayManager {
         for (Map.Entry<UUID, UUID> entry : targetByObserver().entrySet()) {
             if (!targetId.equals(entry.getValue())) continue;
             long capabilities = capabilitiesByObserver().getOrDefault(entry.getKey(), 0L);
-            if (ObserverNativeScreenPayloads.supports(capabilities, ObserverBrewingScreenPayloads.CAPABILITY)) return true;
+            if (ObserverNativeScreenPayloads.supports(capabilities, ObserverVillagersWoodcutterPayloads.CAPABILITY)) {
+                return true;
+            }
         }
         return false;
     }
 
-    private static boolean valid(ObserverBrewingScreenPayloads.BrewingState p) {
-        if (p.protocolVersion() != ObserverBrewingScreenPayloads.PROTOCOL_VERSION
-                || p.sequence() < 0L || !ObserverBrewingScreenPayloads.FAMILY_ID.equals(p.familyId())) return false;
+    private static boolean valid(ObserverVillagersWoodcutterPayloads.WoodcutterState p) {
+        if (p.protocolVersion() != ObserverVillagersWoodcutterPayloads.PROTOCOL_VERSION
+                || p.sequence() < 0L
+                || !ObserverVillagersWoodcutterPayloads.FAMILY_ID.equals(p.familyId())) return false;
         if (!p.open()) {
-            return p.brewingTicks() == 0 && p.fuel() == 0 && p.slots().isEmpty();
+            return p.selectedRecipeIndex() == -1 && p.recipeCount() == 0 && p.requiredInputCount() == 0
+                    && !p.hasInputItem() && p.slots().isEmpty();
         }
-        if (!ObserverBrewingScreenPayloads.SCREEN_CLASS.equals(p.screenClass())
-                || p.brewingTicks() < 0 || p.brewingTicks() > ObserverBrewingScreenPayloads.MAX_BREW_TICKS
-                || p.fuel() < 0 || p.fuel() > ObserverBrewingScreenPayloads.MAX_FUEL) return false;
+        if (!ObserverVillagersWoodcutterPayloads.SCREEN_CLASS.equals(p.screenClass())) return false;
+        if (p.recipeCount() < 0 || p.recipeCount() > 1024 || p.requiredInputCount() < 0 || p.requiredInputCount() > 64) {
+            return false;
+        }
+        if (p.recipeCount() == 0) {
+            if (p.selectedRecipeIndex() != -1 || p.requiredInputCount() != 0) return false;
+        } else if (p.selectedRecipeIndex() < 0 || p.selectedRecipeIndex() >= p.recipeCount()) {
+            return false;
+        }
         return validSlots(p.slots());
     }
 
@@ -89,13 +99,19 @@ public final class ObserverBrewingRelayManager {
 
     @SuppressWarnings("unchecked")
     private static Map<UUID, UUID> targetByObserver() {
-        try { return (Map<UUID, UUID>) TARGET_BY_OBSERVER.get(null); }
-        catch (IllegalAccessException error) { throw new IllegalStateException(error); }
+        try {
+            return (Map<UUID, UUID>) TARGET_BY_OBSERVER.get(null);
+        } catch (IllegalAccessException error) {
+            throw new IllegalStateException(error);
+        }
     }
 
     @SuppressWarnings("unchecked")
     private static Map<UUID, Long> capabilitiesByObserver() {
-        try { return (Map<UUID, Long>) SCREEN_CAPABILITIES_BY_OBSERVER.get(null); }
-        catch (IllegalAccessException error) { throw new IllegalStateException(error); }
+        try {
+            return (Map<UUID, Long>) SCREEN_CAPABILITIES_BY_OBSERVER.get(null);
+        } catch (IllegalAccessException error) {
+            throw new IllegalStateException(error);
+        }
     }
 }
