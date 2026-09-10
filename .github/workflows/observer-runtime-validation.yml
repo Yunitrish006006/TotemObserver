@@ -1,0 +1,152 @@
+name: Observer Runtime Validation
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  runtime-validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - name: Check out TotemObserver
+        uses: actions/checkout@v4
+
+      - name: Set up Java 25
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-disabled: true
+
+      - name: Check out pinned TotemCore
+        uses: actions/checkout@v4
+        with:
+          repository: Yunitrish006006/TotemCore
+          ref: f87cd10fe8aefce77925b9e75dad237f17f38966
+          path: .lockstep/TotemCore
+          persist-credentials: false
+
+      - name: Check out pinned TotemExcavation compile dependency
+        uses: actions/checkout@v4
+        with:
+          repository: Yunitrish006006/TotemExcavation
+          ref: f40b94fd5d9de8b47534343c76a95f62926d2b1b
+          path: .lockstep/TotemExcavation
+          persist-credentials: false
+
+      - name: Check out pinned TotemRemnant
+        uses: actions/checkout@v4
+        with:
+          repository: Yunitrish006006/TotemRemnant
+          ref: 1d89395f93d8ea817947db4653919a11355eb548
+          path: .lockstep/TotemRemnant
+          persist-credentials: false
+
+      - name: Check out pinned TotemAutomata
+        uses: actions/checkout@v4
+        with:
+          repository: Yunitrish006006/TotemAutomata
+          ref: cc4bdb022615faad73bc9e5c0ef6d52b9d0970e6
+          path: .lockstep/TotemAutomata
+          persist-credentials: false
+
+      - name: Check out pinned TotemNexus
+        uses: actions/checkout@v4
+        with:
+          repository: Yunitrish006006/TotemNexus
+          ref: e3f91a19790f9da85494b9ae1d5770dda12e0e43
+          path: .lockstep/TotemNexus
+          persist-credentials: false
+
+      - name: Check out pinned TotemVillagers
+        uses: actions/checkout@v4
+        with:
+          repository: Yunitrish006006/TotemVillagers
+          ref: 615f83c5c3534a40e6ae7a2a0713390512f8b64c
+          path: .lockstep/TotemVillagers
+          persist-credentials: false
+
+      - name: Check out pinned TotemLocksmith
+        uses: actions/checkout@v4
+        with:
+          repository: Yunitrish006006/TotemLocksmith
+          ref: 9e8e25d44887a33839dc2a3b92a424ca4b931e00
+          path: .lockstep/TotemLocksmith
+          persist-credentials: false
+
+      - name: Build pinned Observer owner modules
+        shell: bash
+        run: bash .github/scripts/build-observer-integration-jars.sh
+
+      - name: Enforce module-owned Observer screens
+        shell: bash
+        run: bash .github/scripts/check-owned-observer-screens.sh
+
+      - name: Compile Observer validation source sets
+        shell: bash
+        run: |
+          set -euo pipefail
+          core_jar="${GITHUB_WORKSPACE}/.lockstep/TotemCore/build/libs/totem-core-0.7.18.jar"
+          ./gradlew \
+            -PtotemCoreJar="$core_jar" \
+            -PtotemRemnantJar="${GITHUB_WORKSPACE}/.lockstep/TotemRemnant/build/libs/totem-remnant-0.2.21.jar" \
+            -PtotemAutomataJar="${GITHUB_WORKSPACE}/.lockstep/TotemAutomata/build/libs/totem-automata-0.1.24.jar" \
+            -PtotemNexusJar="${GITHUB_WORKSPACE}/.lockstep/TotemNexus/build/libs/totem-nexus-0.3.17.jar" \
+            -PtotemVillagersJar="${GITHUB_WORKSPACE}/.lockstep/TotemVillagers/build/libs/totem-villagers-0.1.36.jar" \
+            -PtotemLocksmithJar="${GITHUB_WORKSPACE}/.lockstep/TotemLocksmith/build/libs/totem-locksmith-0.1.10.jar" \
+            clean test assemble compileGametestJava compileIntegrationGametestJava --no-daemon --stacktrace
+
+      - name: Run client GameTests
+        shell: bash
+        run: |
+          set -euo pipefail
+          core_jar="${GITHUB_WORKSPACE}/.lockstep/TotemCore/build/libs/totem-core-0.7.18.jar"
+          xvfb-run -a ./gradlew -PtotemCoreJar="$core_jar" runClientGametest --no-daemon --stacktrace
+
+      - name: Run cross-module production sender Client GameTest
+        shell: bash
+        run: |
+          set -euo pipefail
+          core_jar="${GITHUB_WORKSPACE}/.lockstep/TotemCore/build/libs/totem-core-0.7.18.jar"
+          xvfb-run -a ./gradlew \
+            -PtotemCoreJar="$core_jar" \
+            -PtotemRemnantJar="${GITHUB_WORKSPACE}/.lockstep/TotemRemnant/build/libs/totem-remnant-0.2.21.jar" \
+            -PtotemAutomataJar="${GITHUB_WORKSPACE}/.lockstep/TotemAutomata/build/libs/totem-automata-0.1.24.jar" \
+            -PtotemNexusJar="${GITHUB_WORKSPACE}/.lockstep/TotemNexus/build/libs/totem-nexus-0.3.17.jar" \
+            -PtotemVillagersJar="${GITHUB_WORKSPACE}/.lockstep/TotemVillagers/build/libs/totem-villagers-0.1.36.jar" \
+            -PtotemLocksmithJar="${GITHUB_WORKSPACE}/.lockstep/TotemLocksmith/build/libs/totem-locksmith-0.1.10.jar" \
+            runIntegrationClientGametest --no-daemon --stacktrace
+
+      - name: Verify cross-module screenshots
+        shell: bash
+        run: |
+          set -euo pipefail
+          dir="${GITHUB_WORKSPACE}/build/owner-present-integration-screenshots"
+          count="$(find "$dir" -maxdepth 1 -type f -name '*.png' | wc -l)"
+          test "$count" = 10
+
+      - name: Run production-namespace client GameTests
+        shell: bash
+        run: |
+          set -euo pipefail
+          core_jar="${GITHUB_WORKSPACE}/.lockstep/TotemCore/build/libs/totem-core-0.7.18.jar"
+          ./gradlew -PtotemCoreJar="$core_jar" runProductionClientGameTest --no-daemon --stacktrace
+
+      - name: Enforce extraction boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          ! grep -R -n 'dev\.totem\.vanillatweaks' src/gametest src/integrationGametest
+          forbidden='Screenshot\.takeScreenshot|FrameChunk|FrameRelay|DynamicTexture|ObserverFrameRules|observer_frame_chunk|observer_frame_relay|observer_capture_control'
+          ! grep -R -n -E "$forbidden" src/main
