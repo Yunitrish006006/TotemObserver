@@ -19,6 +19,7 @@ class FakeClient:
     def __init__(self):
         self.calls = []
         self.status = 'processing'
+        self.project_type = 'mod'
         self.permission = 1
         self.versions = []
         self.remote = None
@@ -26,7 +27,8 @@ class FakeClient:
     def request(self, path, data=None, content_type=None):
         self.calls.append((path, data))
         if path == '/project/observer':
-            return dict(id='project', team='team', title='TotemObserver', project_type='mod', status=self.status)
+            return dict(id='project', team='team', title='TotemObserver',
+                        project_type=self.project_type, status=self.status, versions=self.versions)
         if path == '/user':
             return {'id': 'user', 'email': 'private-sentinel'}
         if path == '/team/team/members':
@@ -76,6 +78,18 @@ class PublisherTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'UPLOAD_VERSION'):
             p.run(self.root, self.client, 'observer', True)
         self.assertTrue(all(data is None for _, data in self.client.calls))
+
+    def test_initial_generic_draft_only(self):
+        self.client.project_type = 'project'
+        self.client.status = 'draft'
+        p.run(self.root, self.client, 'observer')
+        self.client.versions = ['already-exists']
+        with self.assertRaisesRegex(ValueError, 'initial draft'):
+            p.run(self.root, self.client, 'observer')
+        self.client.project_type = 'modpack'
+        self.client.versions = []
+        with self.assertRaisesRegex(ValueError, 'initial draft'):
+            p.run(self.root, self.client, 'observer')
 
     def test_upload_multipart_roundtrip_and_readback(self):
         result = p.run(self.root, self.client, 'observer', True)

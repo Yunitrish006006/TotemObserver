@@ -80,6 +80,34 @@ def multipart(metadata, artifact):
     return b''.join(parts), 'multipart/form-data; boundary=' + boundary
 
 
+def check_project(client, project_ref, output):
+    project_ref = project_ref.strip().removeprefix('https://modrinth.com/mod/').removeprefix('https://modrinth.com/project/').rstrip('/')
+    require(re.fullmatch(r'[A-Za-z0-9_-]+', project_ref), 'Invalid MODRINTH_PROJECT_ID')
+    project = client.request('/project/' + project_ref)
+    output.mkdir(parents=True, exist_ok=True)
+    project_summary = {key: project.get(key) for key in
+                       ('title', 'slug', 'project_type', 'status', 'requested_status')}
+    project_summary['version_count'] = len(project.get('versions', []))
+    (output / 'project-summary.json').write_text(json.dumps(project_summary, indent=2) + '\n')
+    print(json.dumps(project_summary, indent=2))
+    # An initial empty draft is returned as generic "project" until its first
+    # loader-bearing version exists. Do not accept another established type.
+    empty_draft = (project.get('project_type') == 'project'
+                   and project.get('status') == 'draft' and project.get('versions') == [])
+    require(project.get('project_type') == 'mod' or empty_draft,
+            'Configured project is neither a mod nor an empty initial draft')
+    require(project.get('title', '').replace(' ', '').lower() == 'totemobserver',
+            'Configured project is not TotemObserver')
+    require(project.get('status') in ('approved', 'processing', 'draft', 'unlisted', 'withheld'),
+            'Project status does not permit this release workflow')
+    user = client.request('/user')
+    members = client.request('/team/' + project['team'] + '/members')
+    require(any(m.get('user', {}).get('id') == user['id'] and m.get('accepted') is True
+                and int(m.get('permissions') or 0) & 1 for m in members),
+            'Authenticated member lacks accepted UPLOAD_VERSION permission')
+    return project
+
+
 def run(root, client, project_ref, publish=False):
     props = dict(line.split('=', 1) for line in (root / 'gradle.properties').read_text().splitlines()
                  if '=' in line and not line.startswith('#'))
@@ -97,25 +125,7 @@ def run(root, client, project_ref, publish=False):
         require(mod.get('icon') in jar.namelist(), 'JAR icon is missing')
     changelog = (root / '.github/staging' / f'modrinth-changelog-{version}.md').read_text()
     require(bool(changelog.strip()), 'Release changelog is empty')
-    project_ref = project_ref.strip().removeprefix('https://modrinth.com/mod/').removeprefix('https://modrinth.com/project/').rstrip('/')
-    require(re.fullmatch(r'[A-Za-z0-9_-]+', project_ref), 'Invalid MODRINTH_PROJECT_ID')
-    project = client.request('/project/' + project_ref)
-    output = root / 'build/modrinth-release'
-    output.mkdir(parents=True, exist_ok=True)
-    project_summary = {key: project.get(key) for key in
-                       ('title', 'slug', 'project_type', 'status', 'requested_status')}
-    (output / 'project-summary.json').write_text(json.dumps(project_summary, indent=2) + '\n')
-    print(json.dumps(project_summary, indent=2))
-    require(project.get('project_type') == 'mod', 'Configured project is not a mod')
-    require(project.get('title', '').replace(' ', '').lower() == 'totemobserver',
-            'Configured project is not TotemObserver')
-    require(project.get('status') in ('approved', 'processing', 'draft', 'unlisted', 'withheld'),
-            'Project status does not permit this release workflow')
-    user = client.request('/user')
-    members = client.request('/team/' + project['team'] + '/members')
-    require(any(m.get('user', {}).get('id') == user['id'] and m.get('accepted') is True
-                and int(m.get('permissions', 0)) & 1 for m in members),
-            'Authenticated member lacks accepted UPLOAD_VERSION permission')
+    project = check_project(client, project_ref, root / 'build/modrinth-release')
     versions = client.request('/project/' + project['id'] + '/version?include_changelog=false')
     matching = [v for v in versions if v.get('version_number') == version]
     require(len(matching) <= 1, 'Duplicate remote version numbers')
@@ -151,7 +161,13 @@ def run(root, client, project_ref, publish=False):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--publish', action='store_true', help='Create version after CI gates; default is read-only')
+    parser.add_argument('--check-project', action='store_true', help='Read-only authentication/project preflight without a JAR')
     args = parser.parse_args()
+    require(not (args.publish and args.check_project), 'Select project preflight or publication')
+    if args.check_project:
+        check_project(Client(os.environ.get('MODRINTH_TOKEN', '')),
+                      os.environ.get('MODRINTH_PROJECT_ID', ''), Path('build/modrinth-release'))
+        return
     if args.publish:
         require(os.environ.get('GITHUB_REF') == 'refs/heads/main', 'Publishing is restricted to main')
         require(os.environ.get('OBSERVER_RELEASE_GATES') == os.environ.get('GITHUB_SHA')

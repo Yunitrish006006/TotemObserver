@@ -37,6 +37,11 @@ jobs:
       actions: read
     steps:
       - uses: actions/checkout@v4
+      - name: Authenticate project before building
+        env:
+          MODRINTH_TOKEN: ${{ secrets.MODRINTH_TOKEN }}
+          MODRINTH_PROJECT_ID: ${{ secrets.MODRINTH_PROJECT_ID }}
+        run: python3 .github/scripts/publish-modrinth.py --check-project
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
