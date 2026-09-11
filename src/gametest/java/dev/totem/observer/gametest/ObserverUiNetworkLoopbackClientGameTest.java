@@ -85,6 +85,9 @@ public final class ObserverUiNetworkLoopbackClientGameTest implements FabricClie
                 assertCanSend(player, ObserverPayloads.ScreenRelay.TYPE, "ScreenRelay");
                 assertNoFramebufferPayloadTypes();
 
+                // This single-player transport fixture bypasses the public self-observation command guard.
+                // Give it explicit administrator authority now that native admission checks access too.
+                server.getPlayerList().op(new net.minecraft.server.players.NameAndId(player.getGameProfile()));
                 UUID id = player.getUUID();
                 mainTargetMap().put(id, id);
                 if (!ObserverNativeSessionManager.start(player, player)) throw new AssertionError("Protocol-native loopback session negotiation failed");
