@@ -1,0 +1,142 @@
+name: Verify Nexus Protocol 4
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  nexus-protocol4:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - name: Check out TotemObserver
+        uses: actions/checkout@v4
+
+      - name: Set up Java 25
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-disabled: true
+
+      - name: Check out TotemCore 0.7.19
+        uses: actions/checkout@v4
+        with:
+          repository: Yunitrish006006/TotemCore
+          ref: 8573f7239e7faf6664a5c3ece58d79957f89a1bb
+          path: .lockstep/TotemCore
+          persist-credentials: false
+
+      - name: Check out pinned Observer owner modules
+        uses: actions/checkout@v4
+        with:
+          repository: Yunitrish006006/TotemExcavation
+          ref: f40b94fd5d9de8b47534343c76a95f62926d2b1b
+          path: .lockstep/TotemExcavation
+          persist-credentials: false
+
+      - name: Check out pinned TotemRemnant
+        uses: actions/checkout@v4
+        with:
+          repository: Yunitrish006006/TotemRemnant
+          ref: 1d89395f93d8ea817947db4653919a11355eb548
+          path: .lockstep/TotemRemnant
+          persist-credentials: false
+
+      - name: Check out pinned TotemAutomata
+        uses: actions/checkout@v4
+        with:
+          repository: Yunitrish006006/TotemAutomata
+          ref: cc4bdb022615faad73bc9e5c0ef6d52b9d0970e6
+          path: .lockstep/TotemAutomata
+          persist-credentials: false
+
+      - name: Check out feature TotemNexus
+        uses: actions/checkout@v4
+        with:
+          repository: Yunitrish006006/TotemNexus
+          ref: b5d4d02b2368081f7f22b839bfbbc475b6b38cc3
+          path: .lockstep/TotemNexus
+          persist-credentials: false
+
+      - name: Check out pinned TotemVillagers
+        uses: actions/checkout@v4
+        with:
+          repository: Yunitrish006006/TotemVillagers
+          ref: 615f83c5c3534a40e6ae7a2a0713390512f8b64c
+          path: .lockstep/TotemVillagers
+          persist-credentials: false
+
+      - name: Check out pinned TotemLocksmith
+        uses: actions/checkout@v4
+        with:
+          repository: Yunitrish006006/TotemLocksmith
+          ref: 9e8e25d44887a33839dc2a3b92a424ca4b931e00
+          path: .lockstep/TotemLocksmith
+          persist-credentials: false
+
+      - name: Adapt extracted E2E fixture to feature lockstep
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              if old not in text:
+                  raise SystemExit(f"missing expected text in {path}: {old!r}")
+              p.write_text(text.replace(old, new))
+
+          build = '.github/scripts/build-observer-integration-jars.sh'
+          replace(build, 'totem-core-0.7.18.jar', 'totem-core-0.7.19.jar')
+          replace(build, 'f87cd10fe8aefce77925b9e75dad237f17f38966 0.7.18',
+                         '8573f7239e7faf6664a5c3ece58d79957f89a1bb 0.7.19')
+          replace(build, 'e3f91a19790f9da85494b9ae1d5770dda12e0e43 0.3.17',
+                         'b5d4d02b2368081f7f22b839bfbbc475b6b38cc3 0.3.20')
+          replace(build, 'totem-core 0.7.18', 'totem-core 0.7.19')
+          replace(build, 'totem-nexus-0.3.17.jar', 'totem-nexus-0.3.20.jar')
+          replace(build, 'totem-nexus 0.3.17', 'totem-nexus 0.3.20')
+
+          run = '.github/scripts/run-observer-e2e.sh'
+          replace(run, 'totem-nexus-0.3.17.jar', 'totem-nexus-0.3.20.jar')
+
+          protocols = 'src/main/java/dev/totem/observer/network/ObserverOwnedScreenProtocols.java'
+          replace(protocols, '"nexus", 3,', '"nexus", 4,')
+
+          bridge = 'src/e2e/java/dev/totem/observer/e2e/ObserverNexusE2eBridge.java'
+          replace(bridge, '"nexus", "recovery_compass", 3)', '"nexus", "recovery_compass", 4)')
+          replace(bridge, '"nexus", "registration", 3)', '"nexus", "registration", 4)')
+          replace(bridge, '"nexus", variant, 3)', '"nexus", variant, 4)')
+          PY
+
+      - name: Build feature lockstep production JARs
+        shell: bash
+        run: bash .github/scripts/build-observer-integration-jars.sh
+
+      - name: Enforce module-owned Observer screens
+        shell: bash
+        run: bash .github/scripts/check-owned-observer-screens.sh
+
+      - name: Run extracted Observer dedicated-server two-client E2E with Nexus protocol 4
+        shell: bash
+        run: bash .github/scripts/run-observer-e2e.sh
+
+      - name: Upload protocol-4 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: totem-observer-nexus-protocol4-e2e
+          path: |
+            build/e2e/*.log
+            build/e2e/results/**
+          if-no-files-found: warn
+          retention-days: 14
