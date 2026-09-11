@@ -1,0 +1,125 @@
+name: Publish Modrinth
+
+on:
+  push:
+    branches: [main, 'release/**']
+    paths:
+      - gradle.properties
+      - .github/workflows/publish-modrinth.yml
+      - .github/scripts/publish-modrinth.py
+      - .github/scripts/test-publish-modrinth.py
+      - .github/staging/modrinth-changelog-*.md
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Validate without uploading a version
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: modrinth-observer
+  cancel-in-progress: false
+
+env:
+  CORE_REF: f87cd10fe8aefce77925b9e75dad237f17f38966
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Authenticate project before building
+        env:
+          MODRINTH_TOKEN: ${{ secrets.MODRINTH_TOKEN }}
+          MODRINTH_PROJECT_ID: ${{ secrets.MODRINTH_PROJECT_ID }}
+        run: python3 .github/scripts/publish-modrinth.py --check-project
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-disabled: true
+      - name: Check out pinned TotemCore
+        uses: actions/checkout@v4
+        with:
+          repository: Yunitrish006006/TotemCore
+          ref: ${{ env.CORE_REF }}
+          path: .lockstep/TotemCore
+          persist-credentials: false
+      - name: Test publisher policies
+        run: python3 .github/scripts/test-publish-modrinth.py
+      - name: Build and validate release artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd .lockstep/TotemCore && ./gradlew assemble --no-daemon --stacktrace)
+          test "$(sed -n 's/^mod_version=//p' .lockstep/TotemCore/gradle.properties)" = 0.7.18
+          ./gradlew -PtotemCoreJar="$GITHUB_WORKSPACE/.lockstep/TotemCore/build/libs/totem-core-0.7.18.jar" clean test assemble --no-daemon --stacktrace
+      - name: Require all Observer gates for this commit
+        if: github.event_name == 'workflow_dispatch' && inputs.dry_run == false
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          for workflow in build.yml observer-runtime-validation.yml observer-e2e.yml; do
+            passed=false
+            for attempt in {1..120}; do
+              run="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow}/runs?head_sha=${GITHUB_SHA}&per_page=30" --jq '.workflow_runs | sort_by(.run_number) | last // {}')"
+              if [[ "$(jq -r '.status // empty' <<<"$run")" == completed ]]; then
+                test "$(jq -r .conclusion <<<"$run")" = success
+                passed=true
+                break
+              fi
+              sleep 10
+            done
+            test "$passed" = true || { echo "Required workflow ${workflow} did not pass." >&2; exit 1; }
+          done
+          echo "OBSERVER_RELEASE_GATES=$GITHUB_SHA" >> "$GITHUB_ENV"
+      - name: Validate authenticated project and version
+        if: github.event_name != 'workflow_dispatch' || inputs.dry_run != false
+        env:
+          MODRINTH_TOKEN: ${{ secrets.MODRINTH_TOKEN }}
+          MODRINTH_PROJECT_ID: ${{ secrets.MODRINTH_PROJECT_ID }}
+        run: python3 .github/scripts/publish-modrinth.py
+      - name: Upload and verify version
+        if: github.event_name == 'workflow_dispatch' && inputs.dry_run == false
+        env:
+          MODRINTH_TOKEN: ${{ secrets.MODRINTH_TOKEN }}
+          MODRINTH_PROJECT_ID: ${{ secrets.MODRINTH_PROJECT_ID }}
+        run: python3 .github/scripts/publish-modrinth.py --publish
+      - name: Retain artifact and sanitized validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: observer-modrinth-${{ github.sha }}
+          path: |
+            build/libs/totem-observer-*.jar
+            build/modrinth-release/*.json
+          if-no-files-found: warn
+      - name: Record verified publication
+        if: github.event_name == 'workflow_dispatch' && inputs.dry_run == false
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          evidence=build/modrinth-release/validation.json
+          version="$(jq -er .version "$evidence")"
+          jq --arg run "$GITHUB_RUN_ID" --arg ref "$GITHUB_SHA" '. + {verified_by_run:$run,release_ref:$ref}' "$evidence" > /tmp/observer-publication.json
+          marker=".github/staging/modrinth-published-${version}.json"
+          existing="$(gh api "repos/${GITHUB_REPOSITORY}/contents/.github/staging?ref=main" --jq ".[] | select(.name == \"modrinth-published-${version}.json\") | .sha")"
+          jq -n --arg message "release: record Modrinth ${version} [skip ci]" --arg content "$(base64 -w0 /tmp/observer-publication.json)" --arg sha "$existing" \
+            '{message:$message,content:$content,branch:"main"} + (if $sha == "" then {} else {sha:$sha} end)' > /tmp/observer-marker-request.json
+          gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/${marker}" --input /tmp/observer-marker-request.json >/dev/null

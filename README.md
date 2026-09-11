@@ -2,7 +2,7 @@
 
 Dedicated Observer View runtime for the Totem Minecraft ecosystem.
 
-TotemObserver owns the cross-cutting runtime behind `/observe`: server-authoritative session control, spectator view relay, semantic vanilla Screen reconstruction, module-owned Screen transport, remote cursor state, and the read-only client firewall. It is not a framebuffer/video streaming mod.
+TotemObserver owns the cross-cutting runtime behind `/observeui`: server-authoritative session control, spectator view relay, semantic vanilla Screen reconstruction, module-owned Screen transport, remote cursor state, and the read-only client firewall. It is not a framebuffer/video streaming mod.
 
 ## Platform
 
@@ -44,7 +44,7 @@ src/main/java/dev/totem/observer/
 
 The mod ID is `totem-observer`, but the initial extraction deliberately keeps the existing Observer v4 wire namespace as `totem-vanilla-tweaks`. Repository extraction and packet migration are separate compatibility events; packet IDs are not renamed just because the implementation moved repositories.
 
-Until TotemVanillaTweaks publishes a release with its embedded Observer runtime removed, TotemObserver declares:
+TotemVanillaTweaks 0.1.28 removes its embedded Observer runtime. TotemObserver retains the following incompatibility declaration for older installations:
 
 ```json
 "breaks": {
@@ -52,18 +52,36 @@ Until TotemVanillaTweaks publishes a release with its embedded Observer runtime 
 }
 ```
 
-This prevents both mods from registering the same compatibility packet namespace at once. The constraint can be revised after the VanillaTweaks cleanup release.
+This prevents both mods from registering the same compatibility packet namespace at once. Use TotemVanillaTweaks 0.1.28 or newer when installing both modules; VanillaTweaks is optional for Observer itself. Install TotemObserver and TotemCore on the server and participating clients.
 
-## Migration sequence
+Nexus protocol 3 and protocol 4 are accepted. The target and observer must advertise the same provider family and protocol; protocol 4 is not converted into protocol 3. Nexus 0.3.21 supplies the detail-aware protocol-4 map provider. Feature modules still own variant validation and the production Screen rendering path.
 
-1. Merge the extraction-seam and module-agnostic provider changes in TotemVanillaTweaks.
-2. Merge and release the first TotemObserver module.
-3. Remove the embedded Observer runtime, payload registration and Observer-only mixins/tests from the next TotemVanillaTweaks release.
-4. Move the full Observer GameTest, cross-module integration and dedicated-server/two-client E2E ownership into this repository.
-5. Treat any future change from the compatibility packet namespace to `totem-observer:*` as a deliberate protocol migration with its own compatibility plan.
+## Extraction and validation status
+
+Runtime extraction, VanillaTweaks cleanup, Observer GameTests, cross-module integration and dedicated-server/two-client E2E ownership are implemented. The repository's workflows now cover:
+
+- `Build`: unit tests, assembly and extraction invariants.
+- `Observer Runtime Validation`: client GameTests, owner-present integration and built-artifact production runtime validation.
+- `Observer 3-JVM E2E`: a dedicated server plus separate target and observer clients.
+
+The current source version is 0.1.0. Successful validation does not establish a published release; the Modrinth workflow now supports authenticated dry runs and explicit uploads. Any future change from the compatibility packet namespace to `totem-observer:*` remains a separate protocol migration.
+
+Current-head CI, local build and independent review evidence are recorded in [VALIDATION.md](VALIDATION.md).
 
 The source imported here is based on the fully validated TotemVanillaTweaks Observer branch at commit `7b451cedd5cc4f646df10178b3d14b26ff4689ff`. This repository also independently compiles and assembles the extracted runtime on Java 25 against pinned TotemCore 0.7.18.
 
 ## License
 
 Apache License 2.0. See `LICENSE`.
+
+## Modrinth publication
+
+Repository secrets `MODRINTH_TOKEN` and `MODRINTH_PROJECT_ID` select the authorized project, including projects awaiting moderation. Version upload does not approve the project or change its review status.
+
+- Pushes affecting release files on `main` or `release/**` run authenticated, read-only validation. Manual runs also default to `dry_run=true`.
+- An explicit manual run on `main` with `dry_run=false` uploads the version only after Build, Observer Runtime Validation and Observer 3-JVM E2E pass for that exact commit.
+- The publisher builds against pinned Core 0.7.18, checks JAR identity and incompatibility metadata, requires a version changelog, checks the authenticated member's upload permission, and rejects a conflicting existing version.
+- Successful uploads are read back to verify the file SHA-512, version, loader, Minecraft version and dependencies. Identical existing versions are verified without a duplicate upload. Sanitized evidence and the built JAR are retained as workflow artifacts; uploads also record a staging publication marker.
+- Read-only validation proves authentication, project access and team upload permission. It cannot prove the token's `VERSION_CREATE` scope without actually creating a version.
+
+Prepare `.github/staging/modrinth-changelog-<version>.md` and update `gradle.properties` for the next release. Review the dry-run artifact before manually selecting an upload run. The Modrinth project may remain under review after upload.
