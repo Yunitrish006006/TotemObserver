@@ -1,0 +1,24 @@
+name: Submit Modrinth review
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: modrinth-observer
+  cancel-in-progress: false
+jobs:
+  submit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Submit verified draft and read current review state
+        env:
+          MODRINTH_TOKEN: ${{ secrets.MODRINTH_TOKEN }}
+        run: python3 .github/scripts/submit-modrinth-review.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: observer-review-status
+          path: build/modrinth-release/review-status.json
+          if-no-files-found: warn
