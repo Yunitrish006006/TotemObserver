@@ -39,6 +39,13 @@ project = request('project/' + project_id)
 source_url = 'https://github.com/Yunitrish006006/TotemObserver'
 assert project_id == '9uSvHWrC' and project['title'] == 'TotemObserver'
 assert project.get('source_url') in (None, '', source_url)
+if os.environ.get('INSPECT_ONLY') == 'true':
+    summary = {key: project.get(key) for key in ('id', 'title', 'slug', 'status', 'requested_status', 'description', 'body', 'license', 'categories', 'icon_url', 'source_url', 'issues_url', 'client_side', 'server_side', 'versions', 'moderator_message')}
+    output = Path('build/modrinth-release')
+    output.mkdir(parents=True, exist_ok=True)
+    (output / 'review-status.json').write_text(json.dumps(summary, indent=2) + '\n')
+    print(json.dumps(summary, indent=2))
+    raise SystemExit(0)
 if project['status'] == 'draft':
     request('project/' + project_id, {'status': 'processing', 'requested_status': 'approved',
                                      'source_url': source_url})

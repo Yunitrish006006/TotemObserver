@@ -1,6 +1,12 @@
 name: Submit Modrinth review
 on:
   workflow_dispatch:
+    inputs:
+      inspect_only:
+        description: Inspect project requirements without submitting review
+        type: boolean
+        default: true
+        required: true
 permissions:
   contents: read
 concurrency:
@@ -14,6 +20,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Submit verified draft and read current review state
         env:
+          INSPECT_ONLY: ${{ inputs.inspect_only }}
           MODRINTH_TOKEN: ${{ secrets.MODRINTH_TOKEN }}
         run: python3 .github/scripts/submit-modrinth-review.py
       - uses: actions/upload-artifact@v4
