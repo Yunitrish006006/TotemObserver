@@ -100,6 +100,12 @@ def run(root, client, project_ref, publish=False):
     project_ref = project_ref.strip().removeprefix('https://modrinth.com/mod/').removeprefix('https://modrinth.com/project/').rstrip('/')
     require(re.fullmatch(r'[A-Za-z0-9_-]+', project_ref), 'Invalid MODRINTH_PROJECT_ID')
     project = client.request('/project/' + project_ref)
+    output = root / 'build/modrinth-release'
+    output.mkdir(parents=True, exist_ok=True)
+    project_summary = {key: project.get(key) for key in
+                       ('title', 'slug', 'project_type', 'status', 'requested_status')}
+    (output / 'project-summary.json').write_text(json.dumps(project_summary, indent=2) + '\n')
+    print(json.dumps(project_summary, indent=2))
     require(project.get('project_type') == 'mod', 'Configured project is not a mod')
     require(project.get('title', '').replace(' ', '').lower() == 'totemobserver',
             'Configured project is not TotemObserver')
