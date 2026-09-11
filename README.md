@@ -96,3 +96,9 @@ Repository secrets `MODRINTH_TOKEN` and `MODRINTH_PROJECT_ID` select the authori
 - Read-only validation proves authentication, project access and team upload permission. It cannot prove the token's `VERSION_CREATE` scope without actually creating a version.
 
 Prepare `.github/staging/modrinth-changelog-<version>.md` and update `gradle.properties` for the next release. Review the dry-run artifact before manually selecting an upload run. The Modrinth project may remain under review after upload.
+
+### Current release
+
+Version **0.1.1** was uploaded and verified on 2026-09-11. The project was submitted to Modrinth moderation and read back as **processing**. See `.github/staging/modrinth-published-0.1.1.json` and `.github/staging/modrinth-review-status-0.1.1.json`.
+
+`Submit Modrinth review` is a separate manual workflow. Its default mode only inspects project metadata; submission mode verifies the existing version, fills missing draft metadata from the reviewed project description, and records the fresh moderation state.
