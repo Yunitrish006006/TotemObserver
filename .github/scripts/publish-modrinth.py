@@ -57,7 +57,8 @@ def dependencies_valid(items):
 
 
 def verify_remote(remote, metadata, artifact, sha):
-    for field in ('project_id', 'version_number', 'game_versions', 'loaders', 'version_type'):
+    for field in ('project_id', 'version_number', 'game_versions', 'loaders', 'version_type',
+                  'status', 'environment', 'changelog'):
         require(remote.get(field) == metadata[field], f'Remote {field} mismatch')
     files = remote.get('files', [])
     require(bool(files), 'Remote version has no files')

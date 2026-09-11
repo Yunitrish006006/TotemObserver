@@ -109,6 +109,17 @@ class PublisherTest(unittest.TestCase):
         self.assertFalse(p.dependencies_valid(deps))
         self.assertFalse(p.dependencies_valid(deps[:1]))
 
+    def test_existing_version_metadata_conflicts_are_rejected(self):
+        p.run(self.root, self.client, 'observer', True)
+        self.client.versions = [{'id': 'version', 'version_number': '0.1.0'}]
+        for field, value in [('status', 'draft'), ('status', 'unlisted'),
+                             ('environment', 'client_only'), ('changelog', 'stale')]:
+            original = self.client.remote[field]
+            self.client.remote[field] = value
+            with self.assertRaisesRegex(ValueError, field):
+                p.run(self.root, self.client, 'observer')
+            self.client.remote[field] = original
+
     def test_invalid_project_reference_is_not_requested(self):
         with self.assertRaisesRegex(ValueError, 'MODRINTH_PROJECT_ID'):
             p.run(self.root, self.client, 'other/path')
