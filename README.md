@@ -18,9 +18,20 @@ TotemObserver owns the cross-cutting runtime behind `/observeui`: server-authori
 
 A feature module provider is discovered through the TotemCore entrypoint. Module-owned Screens negotiate through a generic bounded transport and an exact `familyId + protocolVersion` match, so adding a future provider such as `alchemy_cauldron` does not require adding TotemAlchemy knowledge to TotemObserver.
 
+## Commands and world rules
+
+Use `/observeui <player>` to start and `/observeui stop` or Escape to stop. Both players need compatible Observer clients.
+
+| World rule | Default | Effect |
+| --- | --- | --- |
+| `/gamerule totem:observer_enabled true` | `true` | Enable Observer; `false` stops all sessions, including administrators. |
+| `/gamerule totem:observer_allow_friends true` | `false` | Allow non-admin players to observe mutual TotemCore friends. One-way invitations do not qualify. |
+
+Administrators with game-master command permission can observe while the master rule is enabled. Friend access requires both rules. Turning off access, removing a friendship, losing the target or disconnecting ends observation. Return state is saved with the player for recovery after reconnecting or restarting. During observation, movement, teleport and interaction packets are blocked on the server as well as the client.
+
 ## Runtime invariants
 
-- Observer sessions are server-authoritative and spectator-only.
+- Observer sessions are server-authoritative. Players can start from any game mode; the server temporarily uses spectator mode and restores the original mode, dimension, position, rotation and flight state when observation ends.
 - Reconstructed Screens are read-only; Observer input must not mutate the target player's game state.
 - Semantic state is bounded and sequence-checked.
 - Module-owned payload interpretation remains with the owning provider.

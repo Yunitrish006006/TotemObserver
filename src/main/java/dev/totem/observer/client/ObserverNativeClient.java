@@ -70,7 +70,7 @@ public final class ObserverNativeClient {
         return targetScreenCapabilities;
     }
 
-    static boolean observerSessionActive() {
+    public static boolean observerSessionActive() {
         return observerSessionActive;
     }
 
@@ -140,6 +140,7 @@ public final class ObserverNativeClient {
     }
 
     private static void applySession(ObserverNativePayloads.NativeSession payload) {
+        net.minecraft.client.KeyMapping.releaseAll();
         ObserverRemoteSequenceTracker.beginSession();
         observerSessionActive = payload.active()
                 && payload.protocolVersion() == ObserverNativePayloads.PROTOCOL_VERSION;

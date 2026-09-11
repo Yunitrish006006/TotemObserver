@@ -4,17 +4,19 @@ import dev.totem.observer.network.ObserverNativePayloads;
 import dev.totem.observer.network.ObserverNativeScreenPayloads;
 import dev.totem.observer.network.ObserverPayloads;
 import dev.totem.observer.runtime.ObserverSessionManager;
+import dev.totem.observer.runtime.ObserverGameRules;
+import dev.totem.observer.runtime.ObserverReturnState;
+import dev.totem.core.api.v1.social.TotemFriendshipApi;
+import net.minecraft.world.phys.Vec3;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
-import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.GameType;
 
 import java.io.IOException;
 import java.lang.reflect.Field;
-import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -36,6 +38,7 @@ public final class ObserverE2eCommon implements ModInitializer {
     private static int bothClientsSeenTick = -1;
     private static UUID targetId;
     private static UUID observerId;
+    private static Vec3 originalPosition;
 
     @Override
     public void onInitialize() {
@@ -99,12 +102,28 @@ public final class ObserverE2eCommon implements ModInitializer {
                     return;
                 }
 
-                setSpectator(observer);
+                observer.setGameMode(GameType.SURVIVAL);
+                originalPosition = observer.position();
+                var rules = server.overworld().getGameRules();
+                rules.set(ObserverGameRules.ENABLED, false, server);
+                if (invokeProductionStart(observer, target) != 0 || observer.isSpectator()) {
+                    throw new AssertionError("Disabled Observer changed the player's mode");
+                }
+                rules.set(ObserverGameRules.ENABLED, true, server);
+                rules.set(ObserverGameRules.ALLOW_FRIENDS, true, server);
+                TotemFriendshipApi.inviteOrAccept(server, observer.getUUID(), target.getUUID());
+                if (invokeProductionStart(observer, target) != 0) {
+                    throw new AssertionError("One-way invitation allowed observation");
+                }
+                TotemFriendshipApi.inviteOrAccept(server, target.getUUID(), observer.getUUID());
                 int result = invokeProductionStart(observer, target);
                 if (result != 1) {
                     throw new AssertionError("ObserverSessionManager.start returned " + result);
                 }
 
+                if (!observer.isSpectator() || !observer.hasAttached(ObserverReturnState.TYPE)) {
+                    throw new AssertionError("Survival admission did not preserve a return state");
+                }
                 targetId = target.getUUID();
                 observerId = observer.getUUID();
                 if (!targetId.equals(targetMap().get(observerId))) {
@@ -121,6 +140,13 @@ public final class ObserverE2eCommon implements ModInitializer {
 
             boolean sessionPresent = observerId != null && targetMap().containsKey(observerId);
             if (!sessionPresent) {
+                ServerPlayer observer = findPlayer(server, OBSERVER_NAME);
+                if (observer == null || observer.gameMode.getGameModeForPlayer() != GameType.SURVIVAL
+                        || observer.hasAttached(ObserverReturnState.TYPE)
+                        || observer.position().distanceToSqr(originalPosition) > 0.01) {
+                    throw new AssertionError("Observer stop did not restore survival and original position");
+                }
+                TotemFriendshipApi.removeRelationship(server, observerId, targetId);
                 marker("server-cleanup-ok.txt", "Observer Stop removed protocol-native session state.\n");
                 cleanedUp = true;
             }
@@ -148,33 +174,10 @@ public final class ObserverE2eCommon implements ModInitializer {
 
     private static int invokeProductionStart(ServerPlayer observer, ServerPlayer target) {
         try {
-            Method method = ObserverSessionManager.class.getDeclaredMethod(
-                    "start",
-                    CommandSourceStack.class,
-                    ServerPlayer.class,
-                    ServerPlayer.class
-            );
-            method.setAccessible(true);
-            return (Integer) method.invoke(
-                    null,
-                    observer.createCommandSourceStack(),
-                    observer,
-                    target
-            );
-        } catch (ReflectiveOperationException error) {
-            throw new RuntimeException("Failed to invoke ObserverSessionManager.start", error);
-        }
-    }
-
-    private static void setSpectator(ServerPlayer player) {
-        try {
-            Method method = ServerPlayer.class.getMethod("setGameMode", GameType.class);
-            Object result = method.invoke(player, GameType.SPECTATOR);
-            if (!player.isSpectator()) {
-                throw new IllegalStateException("setGameMode did not put Observer into spectator mode: " + result);
-            }
-        } catch (ReflectiveOperationException error) {
-            throw new RuntimeException("Failed to put Observer into spectator mode", error);
+            return observer.level().getServer().getCommands().getDispatcher().execute(
+                    "observeui " + target.getGameProfile().name(), observer.createCommandSourceStack());
+        } catch (com.mojang.brigadier.exceptions.CommandSyntaxException error) {
+            throw new RuntimeException("Failed to execute /observeui as a non-OP friend", error);
         }
     }
 

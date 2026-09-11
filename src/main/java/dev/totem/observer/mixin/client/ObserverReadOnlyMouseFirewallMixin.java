@@ -1,6 +1,7 @@
 package dev.totem.observer.mixin.client;
 
 import dev.totem.observer.client.ObserverOwnedScreenCoordinator;
+import dev.totem.observer.client.ObserverNativeClient;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.MouseHandler;
 import net.minecraft.client.input.MouseButtonInfo;
@@ -18,16 +19,16 @@ public abstract class ObserverReadOnlyMouseFirewallMixin {
 
     @Inject(method = "onButton", at = @At("HEAD"), cancellable = true)
     private void totem$blockObserverButton(long window, MouseButtonInfo button, int action, CallbackInfo ci) {
-        if (ObserverOwnedScreenCoordinator.isReadOnlyObserverScreen(minecraft.gui.screen())) ci.cancel();
+        if (ObserverNativeClient.observerSessionActive() || ObserverOwnedScreenCoordinator.isReadOnlyObserverScreen(minecraft.gui.screen())) ci.cancel();
     }
 
     @Inject(method = "onScroll", at = @At("HEAD"), cancellable = true)
     private void totem$blockObserverScroll(long window, double horizontal, double vertical, CallbackInfo ci) {
-        if (ObserverOwnedScreenCoordinator.isReadOnlyObserverScreen(minecraft.gui.screen())) ci.cancel();
+        if (ObserverNativeClient.observerSessionActive() || ObserverOwnedScreenCoordinator.isReadOnlyObserverScreen(minecraft.gui.screen())) ci.cancel();
     }
 
     @Inject(method = "onMove", at = @At("HEAD"), cancellable = true)
     private void totem$blockObserverMove(long window, double x, double y, CallbackInfo ci) {
-        if (ObserverOwnedScreenCoordinator.isReadOnlyObserverScreen(minecraft.gui.screen())) ci.cancel();
+        if (ObserverNativeClient.observerSessionActive() || ObserverOwnedScreenCoordinator.isReadOnlyObserverScreen(minecraft.gui.screen())) ci.cancel();
     }
 }

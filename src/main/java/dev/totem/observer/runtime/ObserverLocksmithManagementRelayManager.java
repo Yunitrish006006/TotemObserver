@@ -36,7 +36,7 @@ public final class ObserverLocksmithManagementRelayManager {
             if (!ObserverNativeScreenPayloads.supports(capabilitiesByObserver().getOrDefault(observerId, 0L),
                     ObserverLocksmithManagementPayloads.CAPABILITY)) continue;
             ServerPlayer observer = server.getPlayerList().getPlayer(observerId);
-            if (observer != null && observer.isSpectator()
+            if (observer != null && ObserverAccessPolicy.allows(observer, target)
                     && ServerPlayNetworking.canSend(observer, ObserverLocksmithManagementPayloads.ManagementRelay.TYPE)) {
                 ServerPlayNetworking.send(observer, relay);
             }

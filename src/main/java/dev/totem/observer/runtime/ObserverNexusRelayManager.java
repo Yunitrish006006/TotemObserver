@@ -35,7 +35,7 @@ public final class ObserverNexusRelayManager {
             long capabilities = capabilitiesByObserver().getOrDefault(observerId, 0L);
             if (!ObserverNativeScreenPayloads.supports(capabilities, ObserverNativeScreenPayloads.CAPABILITY_NEXUS)) continue;
             ServerPlayer observer = server.getPlayerList().getPlayer(observerId);
-            if (observer != null && observer.isSpectator()
+            if (observer != null && ObserverAccessPolicy.allows(observer, target)
                     && ServerPlayNetworking.canSend(observer, ObserverNexusScreenPayloads.NexusRelay.TYPE)) {
                 ServerPlayNetworking.send(observer, relay);
             }

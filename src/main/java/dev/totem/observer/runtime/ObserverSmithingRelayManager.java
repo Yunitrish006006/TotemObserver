@@ -34,7 +34,7 @@ public final class ObserverSmithingRelayManager {
             long caps = capabilitiesByObserver().getOrDefault(observerId, 0L);
             if (!ObserverNativeScreenPayloads.supports(caps, ObserverSmithingScreenPayloads.CAPABILITY)) continue;
             ServerPlayer observer = server.getPlayerList().getPlayer(observerId);
-            if (observer != null && observer.isSpectator()
+            if (observer != null && ObserverAccessPolicy.allows(observer, target)
                     && ServerPlayNetworking.canSend(observer, ObserverSmithingScreenPayloads.SmithingRelay.TYPE)) {
                 ServerPlayNetworking.send(observer, relay);
             }

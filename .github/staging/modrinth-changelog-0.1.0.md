@@ -15,3 +15,7 @@
 - 伺服器與參與的客戶端皆須安裝 Fabric API 與 TotemCore >=0.7.18 <0.8.0。VanillaTweaks 為選配；並裝時需 0.1.28 以上。
 
 Minecraft 26.2 / Fabric / Java 25. Project review status is independent of version upload status.
+
+- Added `totem:observer_enabled` and `totem:observer_allow_friends` world rules with server-authoritative mutual-friend access and revocation.
+- Players can start observation from any game mode. Temporary spectator mode restores the original mode and position on stop/disconnect, with persistent recovery data.
+- Added server-side spectator-action protection and whole-session client input suppression.

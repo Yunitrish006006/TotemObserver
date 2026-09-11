@@ -4,6 +4,10 @@ import com.mojang.brigadier.CommandDispatcher;
 import dev.totem.observer.network.ObserverPayloads;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
+import net.fabricmc.fabric.api.entity.event.v1.ServerPlayerEvents;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
+import net.minecraft.world.level.GameType;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -26,12 +30,18 @@ public final class ObserverSessionManager {
 
     public static void register() {
         CommandRegistrationCallback.EVENT.register((dispatcher, buildContext, selection) -> registerCommand(dispatcher));
-        ServerTickEvents.END_SERVER_TICK.register(ObserverSessionManager::cleanup);
+        ServerTickEvents.START_SERVER_TICK.register(ObserverSessionManager::cleanup);
+        ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> stop(handler.player, true));
+        ServerPlayerEvents.AFTER_RESPAWN.register((oldPlayer, newPlayer, alive) -> ObserverReturnState.restore(newPlayer));
+        ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> ObserverReturnState.restore(handler.player));
+        ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
+            for (ServerPlayer player : server.getPlayerList().getPlayers()) stop(player, true);
+        });
     }
 
     private static void registerCommand(CommandDispatcher<CommandSourceStack> dispatcher) {
         dispatcher.register(Commands.literal("observeui")
-                .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+                .requires(source -> source.getEntity() instanceof ServerPlayer)
                 .then(Commands.literal("stop")
                         .executes(context -> stop(context.getSource().getPlayerOrException(), true)))
                 .then(Commands.argument("target", EntityArgument.player())
@@ -43,8 +53,8 @@ public final class ObserverSessionManager {
     }
 
     private static int start(CommandSourceStack source, ServerPlayer observer, ServerPlayer target) {
-        if (!observer.isSpectator()) {
-            source.sendFailure(Component.literal("/observeui can only be used while in Spectator mode."));
+        if (!ObserverAccessPolicy.allows(observer, target)) {
+            source.sendFailure(Component.translatable("message.totem-observer.access_denied"));
             return 0;
         }
         if (observer == target) {
@@ -58,12 +68,15 @@ public final class ObserverSessionManager {
             return 0;
         }
 
-        stop(observer, false);
+        stop(observer, true);
+        observer.closeContainer();
+        ObserverReturnState.capture(observer);
+        observer.setGameMode(GameType.SPECTATOR);
         TARGET_BY_OBSERVER.put(observer.getUUID(), target.getUUID());
         observer.setCamera(target);
         if (!ObserverNativeSessionManager.start(observer, target)) {
             TARGET_BY_OBSERVER.remove(observer.getUUID());
-            observer.setCamera(null);
+            ObserverReturnState.restore(observer);
             source.sendFailure(Component.literal("Failed to negotiate protocol-native Observer View."));
             return 0;
         }
@@ -77,8 +90,9 @@ public final class ObserverSessionManager {
     public static int stop(ServerPlayer observer, boolean resetCamera) {
         UUID targetId = TARGET_BY_OBSERVER.remove(observer.getUUID());
         boolean nativeSession = ObserverNativeSessionManager.stop(observer);
-        if (resetCamera) {
+        if (resetCamera && (targetId != null || nativeSession || observer.hasAttached(ObserverReturnState.TYPE))) {
             observer.setCamera(null);
+            ObserverReturnState.restore(observer);
         }
         return targetId != null || nativeSession ? 1 : 0;
     }
@@ -102,7 +116,8 @@ public final class ObserverSessionManager {
             if (observer == null) {
                 TARGET_BY_OBSERVER.remove(observerId);
                 ObserverNativeSessionManager.removeOfflineObserver(server, observerId);
-            } else if (!observer.isSpectator() || target == null) {
+            } else if (!observer.isSpectator() || !ObserverAccessPolicy.allows(observer, target)
+                    || observer.getCamera() != target) {
                 stop(observer, true);
             }
         }
@@ -119,7 +134,7 @@ public final class ObserverSessionManager {
             }
             ServerPlayer observer = server.getPlayerList().getPlayer(entry.getKey());
             if (observer != null
-                    && observer.isSpectator()
+                    && ObserverAccessPolicy.allows(observer, server.getPlayerList().getPlayer(targetId))
                     && ServerPlayNetworking.canSend(observer, ObserverPayloads.ScreenRelay.TYPE)) {
                 action.accept(observer);
             }

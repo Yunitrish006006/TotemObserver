@@ -38,7 +38,7 @@ public final class ObserverAutomataCopperGolemRelayManager {
             if (!ObserverNativeScreenPayloads.supports(
                     capabilities, ObserverNativeScreenPayloads.CAPABILITY_AUTOMATA_COPPER_GOLEM)) continue;
             ServerPlayer observer = server.getPlayerList().getPlayer(observerId);
-            if (observer != null && observer.isSpectator()
+            if (observer != null && ObserverAccessPolicy.allows(observer, target)
                     && ServerPlayNetworking.canSend(observer, ObserverAutomataCopperGolemPayloads.CopperGolemRelay.TYPE)) {
                 ServerPlayNetworking.send(observer, relay);
             }

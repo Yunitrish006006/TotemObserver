@@ -1,4 +1,9 @@
 {
   "screen.totem-vanilla-tweaks.observer_view": "觀察者視角",
-  "screen.totem-vanilla-tweaks.observer_view.exit": "ESC：結束觀察"
+  "screen.totem-vanilla-tweaks.observer_view.exit": "ESC：結束觀察",
+  "gamerule.totem.observer_enabled": "Observer 功能開啟",
+  "gamerule.totem.observer_enabled.description": "允許使用 Observer；關閉時會結束現有觀察連線。",
+  "gamerule.totem.observer_allow_friends": "允許好友使用 Observer",
+  "gamerule.totem.observer_allow_friends.description": "允許非管理員觀察雙向好友；取消好友或關閉規則時會結束該連線。",
+  "message.totem-observer.access_denied": "Observer 已關閉，或你沒有觀察這位玩家的權限。"
 }

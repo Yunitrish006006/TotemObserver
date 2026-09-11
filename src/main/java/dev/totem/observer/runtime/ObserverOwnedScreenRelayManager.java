@@ -50,7 +50,7 @@ public final class ObserverOwnedScreenRelayManager {
         var relay = new ObserverOwnedScreenPayloads.Relay(targetId, payload.open(), snapshot);
         for (UUID observerId : observerIds) {
             ServerPlayer observer = target.level().getServer().getPlayerList().getPlayer(observerId);
-            if (observer != null && observer.isSpectator()
+            if (observer != null && ObserverAccessPolicy.allows(observer, target)
                     && ServerPlayNetworking.canSend(observer, ObserverOwnedScreenPayloads.Relay.TYPE)) {
                 ServerPlayNetworking.send(observer, relay);
             }
