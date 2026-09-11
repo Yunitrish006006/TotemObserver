@@ -20,7 +20,12 @@ def request(path, data=None):
             body = response.read()
             return json.loads(body) if body else None
     except urllib.error.HTTPError as error:
-        raise RuntimeError(f'Modrinth review request returned HTTP {error.code}') from None
+        try:
+            detail = json.load(error).get('description', '')
+        except (ValueError, AttributeError):
+            detail = ''
+        detail = str(detail).replace(token, '[redacted]')[:500]
+        raise RuntimeError(f'Modrinth review request returned HTTP {error.code}: {detail}') from None
 
 
 version = next(line.split('=', 1)[1] for line in Path('gradle.properties').read_text().splitlines()
@@ -31,9 +36,12 @@ remote = request('version/' + marker['modrinth_version_id'])
 assert remote['project_id'] == project_id and remote['version_number'] == version
 assert any(f.get('primary') and f['hashes']['sha512'] == marker['sha512'] for f in remote['files'])
 project = request('project/' + project_id)
-assert project['source_url'] == 'https://github.com/Yunitrish006006/TotemObserver'
+source_url = 'https://github.com/Yunitrish006006/TotemObserver'
+assert project_id == '9uSvHWrC' and project['title'] == 'TotemObserver'
+assert project.get('source_url') in (None, '', source_url)
 if project['status'] == 'draft':
-    request('project/' + project_id, {'status': 'processing', 'requested_status': 'approved'})
+    request('project/' + project_id, {'status': 'processing', 'requested_status': 'approved',
+                                     'source_url': source_url})
 project = request('project/' + project_id)
 summary = {key: project.get(key) for key in ('id', 'slug', 'status', 'requested_status', 'queued')}
 summary['version'] = version
