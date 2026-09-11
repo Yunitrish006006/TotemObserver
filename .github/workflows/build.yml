@@ -56,8 +56,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -f build/libs/totem-observer-0.1.0.jar
-          test "$(sed -n 's/^mod_version=//p' gradle.properties)" = '0.1.0'
+          version="$(sed -n 's/^mod_version=//p' gradle.properties)"
+          test -n "$version"
+          test -f "build/libs/totem-observer-${version}.jar"
           ! grep -R -n 'dev\.totem\.vanillatweaks' src/main/java
           ! grep -R -n 'TotemVanillaTweaks' src/main/java
           ! grep -R -n 'dev\.totem\.observer\.observer' src/main/java

@@ -10,7 +10,7 @@ TotemObserver owns the cross-cutting runtime behind `/observeui`: server-authori
 - Java 25
 - Fabric Loader / Fabric API
 - TotemCore `>=0.7.18 <0.8.0`
-- initial module version `0.1.0`
+- module version `0.1.1`
 
 ## Ownership model
 
@@ -75,7 +75,7 @@ Runtime extraction, VanillaTweaks cleanup, Observer GameTests, cross-module inte
 - `Observer Runtime Validation`: client GameTests, owner-present integration and built-artifact production runtime validation.
 - `Observer 3-JVM E2E`: a dedicated server plus separate target and observer clients.
 
-The current source version is 0.1.0. Successful validation does not establish a published release; the Modrinth workflow now supports authenticated dry runs and explicit uploads. Any future change from the compatibility packet namespace to `totem-observer:*` remains a separate protocol migration.
+The current source version is 0.1.1. Successful validation does not establish a published release; the Modrinth workflow now supports authenticated dry runs and explicit uploads. Any future change from the compatibility packet namespace to `totem-observer:*` remains a separate protocol migration.
 
 Current-head CI, local build and independent review evidence are recorded in [VALIDATION.md](VALIDATION.md).
 

@@ -52,6 +52,17 @@ final class ObserverAbsentOwnerProviderAssertions {
                 context.waitTicks(2);
                 persistForCi(context.takeScreenshot("owner-absent-nexus-recovery-compass-unsupported"),
                         "owner-absent-nexus-recovery-compass-unsupported.png");
+                for (String role : List.of("administrator", "allowed")) {
+                    context.runOnClient(minecraft -> ObserverOwnedScreenCoordinator.open(new ObserverScreenSnapshot(
+                            "nexus_access", role, 1, 3L, Component.literal("Access management unavailable"),
+                            List.of(), new int[0], Map.of(), new byte[0])));
+                    context.waitFor(minecraft -> minecraft.gui.screen() instanceof ObserverReadOnlyScreen
+                            && minecraft.gui.screen().getClass().getSimpleName().equals("ObserverMetadataScreen"), 100);
+                    context.waitTicks(2);
+                    String screenshot = "owner-absent-nexus-access-" + role + "-unsupported";
+                    persistForCi(context.takeScreenshot(screenshot), screenshot + ".png");
+                    context.runOnClient(minecraft -> ObserverOwnedScreenCoordinator.close("nexus_access"));
+                }
             }
             context.runOnClient(minecraft -> {
                 ObserverOwnedScreenCoordinator.close(family);
