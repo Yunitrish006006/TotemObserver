@@ -50,7 +50,7 @@ jobs:
           core_version="$(sed -n 's/^mod_version=//p' .lockstep/TotemCore/gradle.properties)"
           test "$core_version" = '0.7.18'
           core_jar="${GITHUB_WORKSPACE}/.lockstep/TotemCore/build/libs/totem-core-${core_version}.jar"
-          ./gradlew -PtotemCoreJar="$core_jar" clean test assemble --no-daemon --stacktrace
+          ./gradlew -PtotemCoreJar="$core_jar" clean test assemble compileGametestJava runGameTest --no-daemon --stacktrace
 
       - name: Enforce Observer extraction invariants
         shell: bash

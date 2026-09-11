@@ -1,6 +1,9 @@
 package dev.totem.observer.mixin.client;
 
 import dev.totem.observer.client.ObserverOwnedScreenCoordinator;
+import dev.totem.observer.client.ObserverNativeClient;
+import dev.totem.observer.network.ObserverPayloads;
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.KeyboardHandler;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.input.CharacterEvent;
@@ -21,18 +24,21 @@ public abstract class ObserverReadOnlyKeyboardFirewallMixin {
 
     @Inject(method = "keyPress", at = @At("HEAD"), cancellable = true)
     private void totem$blockObserverKey(long window, int action, KeyEvent event, CallbackInfo ci) {
-        if (!ObserverOwnedScreenCoordinator.isReadOnlyObserverScreen(minecraft.gui.screen())) return;
-        if (action == GLFW.GLFW_PRESS && event.key() == GLFW.GLFW_KEY_ESCAPE) minecraft.gui.screen().onClose();
+        if (!ObserverNativeClient.observerSessionActive() && !ObserverOwnedScreenCoordinator.isReadOnlyObserverScreen(minecraft.gui.screen())) return;
+        if (action == GLFW.GLFW_PRESS && event.key() == GLFW.GLFW_KEY_ESCAPE) {
+            if (ObserverNativeClient.observerSessionActive()) ClientPlayNetworking.send(new ObserverPayloads.Stop());
+            else minecraft.gui.screen().onClose();
+        }
         ci.cancel();
     }
 
     @Inject(method = "charTyped", at = @At("HEAD"), cancellable = true)
     private void totem$blockObserverCharacter(long window, CharacterEvent event, CallbackInfo ci) {
-        if (ObserverOwnedScreenCoordinator.isReadOnlyObserverScreen(minecraft.gui.screen())) ci.cancel();
+        if (ObserverNativeClient.observerSessionActive() || ObserverOwnedScreenCoordinator.isReadOnlyObserverScreen(minecraft.gui.screen())) ci.cancel();
     }
 
     @Inject(method = "preeditCallback", at = @At("HEAD"), cancellable = true)
     private void totem$blockObserverPreedit(long window, PreeditEvent event, CallbackInfo ci) {
-        if (ObserverOwnedScreenCoordinator.isReadOnlyObserverScreen(minecraft.gui.screen())) ci.cancel();
+        if (ObserverNativeClient.observerSessionActive() || ObserverOwnedScreenCoordinator.isReadOnlyObserverScreen(minecraft.gui.screen())) ci.cancel();
     }
 }

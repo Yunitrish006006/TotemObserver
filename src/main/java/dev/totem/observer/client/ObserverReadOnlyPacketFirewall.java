@@ -31,8 +31,9 @@ public final class ObserverReadOnlyPacketFirewall {
 
     public static boolean suppress(Packet<?> packet) {
         Screen current = Minecraft.getInstance().gui.screen();
-        if (!readOnly(current) && TRANSITION_DEPTH.get() <= 0) return false;
-        if (!isUiActionPacket(packet)) return false;
+        boolean active = ObserverNativeClient.observerSessionActive();
+        if (!active && !readOnly(current) && TRANSITION_DEPTH.get() <= 0) return false;
+        if (!isUiActionPacket(packet) && !(active && isWorldActionPacket(packet))) return false;
         SUPPRESSED.computeIfAbsent(packet.getClass(), ignored -> new AtomicLong()).incrementAndGet();
         return true;
     }
@@ -54,6 +55,23 @@ public final class ObserverReadOnlyPacketFirewall {
                 || packet instanceof ServerboundPlaceRecipePacket
                 || packet instanceof ServerboundRecipeBookChangeSettingsPacket
                 || packet instanceof ServerboundRecipeBookSeenRecipePacket;
+    }
+
+    public static boolean isWorldActionPacket(Packet<?> packet) {
+        return packet instanceof ServerboundAttackPacket
+                || packet instanceof ServerboundSpectatorActionPacket
+                || packet instanceof ServerboundPlayerAbilitiesPacket
+                || packet instanceof ServerboundMoveVehiclePacket
+                || packet instanceof ServerboundMovePlayerPacket
+                || packet instanceof ServerboundPlayerInputPacket
+                || packet instanceof ServerboundPlayerActionPacket
+                || packet instanceof ServerboundPlayerCommandPacket
+                || packet instanceof ServerboundInteractPacket
+                || packet instanceof ServerboundUseItemPacket
+                || packet instanceof ServerboundUseItemOnPacket
+                || packet instanceof ServerboundSetCreativeModeSlotPacket
+                || packet instanceof ServerboundSetCarriedItemPacket
+                || packet instanceof ServerboundTeleportToEntityPacket;
     }
 
     public static long suppressedCount(Class<? extends Packet<?>> packetClass) {

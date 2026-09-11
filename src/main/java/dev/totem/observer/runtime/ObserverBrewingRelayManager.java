@@ -36,7 +36,7 @@ public final class ObserverBrewingRelayManager {
             long capabilities = capabilitiesByObserver().getOrDefault(observerId, 0L);
             if (!ObserverNativeScreenPayloads.supports(capabilities, ObserverBrewingScreenPayloads.CAPABILITY)) continue;
             ServerPlayer observer = server.getPlayerList().getPlayer(observerId);
-            if (observer != null && observer.isSpectator()
+            if (observer != null && ObserverAccessPolicy.allows(observer, target)
                     && ServerPlayNetworking.canSend(observer, ObserverBrewingScreenPayloads.BrewingRelay.TYPE)) {
                 ServerPlayNetworking.send(observer, relay);
             }

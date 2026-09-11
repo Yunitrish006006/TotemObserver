@@ -52,7 +52,7 @@ public final class ObserverNativeSessionManager {
     }
 
     public static boolean start(ServerPlayer observer, ServerPlayer target) {
-        if (!supports(observer, target)) return false;
+        if (!ObserverAccessPolicy.allows(observer, target) || !supports(observer, target)) return false;
         long screenCapabilities = negotiatedScreenCapabilities(observer);
         TARGET_BY_OBSERVER.put(observer.getUUID(), target.getUUID());
         SCREEN_CAPABILITIES_BY_OBSERVER.put(observer.getUUID(), screenCapabilities);
@@ -251,7 +251,7 @@ public final class ObserverNativeSessionManager {
             if (requiredCapability != 0L && !ObserverNativeScreenPayloads.supports(
                     SCREEN_CAPABILITIES_BY_OBSERVER.getOrDefault(observerId, 0L), requiredCapability)) continue;
             ServerPlayer observer = server.getPlayerList().getPlayer(observerId);
-            if (observer != null && observer.isSpectator() && ServerPlayNetworking.canSend(observer, type)) {
+            if (observer != null && ObserverAccessPolicy.allows(observer, target) && ServerPlayNetworking.canSend(observer, type)) {
                 ServerPlayNetworking.send(observer, relay);
             }
         }

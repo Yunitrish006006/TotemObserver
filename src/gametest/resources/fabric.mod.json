@@ -3,7 +3,7 @@
   "id": "totem-observer-gametest",
   "version": "1.0.0",
   "name": "TotemObserver GameTests",
-  "environment": "client",
+  "environment": "*",
   "entrypoints": {
     "fabric-client-gametest": [
       "dev.totem.observer.gametest.ObserverUiClientGameTest",
@@ -31,6 +31,9 @@
       "dev.totem.observer.gametest.ObserverHorseClientGameTest",
       "dev.totem.observer.gametest.ObserverUiNetworkLoopbackClientGameTest",
       "dev.totem.observer.gametest.ObserverVanillaProductionSenderClientGameTest"
+    ],
+    "fabric-gametest": [
+      "dev.totem.observer.runtime.ObserverAccessGameTest"
     ]
   },
   "depends": {

@@ -1,0 +1,7 @@
+{
+  "gamerule.totem.observer_enabled": "Enable Observer",
+  "gamerule.totem.observer_enabled.description": "Allow Observer sessions. Disabling ends current sessions.",
+  "gamerule.totem.observer_allow_friends": "Allow friends to use Observer",
+  "gamerule.totem.observer_allow_friends.description": "Allow non-administrators to observe mutual friends. Removing friendship or disabling this rule ends their sessions.",
+  "message.totem-observer.access_denied": "Observer is disabled, or you are not authorized to observe this player."
+}

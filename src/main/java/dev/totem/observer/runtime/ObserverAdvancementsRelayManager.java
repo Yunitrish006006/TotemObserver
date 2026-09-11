@@ -36,7 +36,7 @@ public final class ObserverAdvancementsRelayManager {
             if (!ObserverNativeScreenPayloads.supports(capabilitiesByObserver().getOrDefault(observerId, 0L),
                     ObserverAdvancementsScreenPayloads.CAPABILITY)) continue;
             ServerPlayer observer = server.getPlayerList().getPlayer(observerId);
-            if (observer != null && observer.isSpectator()
+            if (observer != null && ObserverAccessPolicy.allows(observer, target)
                     && ServerPlayNetworking.canSend(observer, ObserverAdvancementsScreenPayloads.AdvancementsRelay.TYPE)) {
                 ServerPlayNetworking.send(observer, relay);
             }

@@ -36,7 +36,7 @@ public final class ObserverNexusDeathNodeAdminRelayManager {
             if (!ObserverNativeScreenPayloads.supports(capabilitiesByObserver().getOrDefault(observerId, 0L),
                     ObserverNexusDeathNodeAdminPayloads.CAPABILITY)) continue;
             ServerPlayer observer = server.getPlayerList().getPlayer(observerId);
-            if (observer != null && observer.isSpectator()
+            if (observer != null && ObserverAccessPolicy.allows(observer, target)
                     && ServerPlayNetworking.canSend(observer, ObserverNexusDeathNodeAdminPayloads.AdminRelay.TYPE)) {
                 ServerPlayNetworking.send(observer, relay);
             }

@@ -11,6 +11,8 @@ public final class ObserverServerRuntime {
     private ObserverServerRuntime() {}
 
     public static void register() {
+        ObserverGameRules.register();
+        ObserverReturnState.register();
         ObserverPayloadRegistration.register();
         ObserverSessionManager.register();
     }

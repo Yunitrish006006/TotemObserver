@@ -62,7 +62,7 @@ public final class ObserverRemoteCursorRelayManager {
         for (UUID observerId : familyObservers) {
             if (!cursorObservers.contains(observerId)) continue;
             ServerPlayer observer = target.level().getServer().getPlayerList().getPlayer(observerId);
-            if (observer != null && observer.isSpectator()
+            if (observer != null && ObserverAccessPolicy.allows(observer, target)
                     && ServerPlayNetworking.canSend(observer, ObserverRemoteCursorPayloads.Relay.TYPE)) {
                 ServerPlayNetworking.send(observer, relay);
             }

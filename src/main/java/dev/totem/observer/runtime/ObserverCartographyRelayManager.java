@@ -36,7 +36,7 @@ public final class ObserverCartographyRelayManager {
             if (!ObserverNativeScreenPayloads.supports(capabilitiesByObserver().getOrDefault(observerId, 0L),
                     ObserverCartographyScreenPayloads.CAPABILITY)) continue;
             ServerPlayer observer = server.getPlayerList().getPlayer(observerId);
-            if (observer != null && observer.isSpectator()
+            if (observer != null && ObserverAccessPolicy.allows(observer, target)
                     && ServerPlayNetworking.canSend(observer, ObserverCartographyScreenPayloads.CartographyRelay.TYPE)) {
                 ServerPlayNetworking.send(observer, relay);
             }
