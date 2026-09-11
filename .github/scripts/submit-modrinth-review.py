@@ -6,11 +6,11 @@ import urllib.error
 import urllib.request
 
 
-def request(path, data=None):
+def request(path, data=None, api_version="v2"):
     token = os.environ['MODRINTH_TOKEN']
     if not token:
         raise RuntimeError('MODRINTH_TOKEN is empty')
-    req = urllib.request.Request('https://api.modrinth.com/v2/' + path,
+    req = urllib.request.Request('https://api.modrinth.com/' + api_version + '/' + path,
                                  data=json.dumps(data).encode() if data is not None else None,
                                  headers={'Authorization': token, 'Content-Type': 'application/json',
                                           'User-Agent': 'Yunitrish006006/TotemObserver-review/1.0'},
@@ -47,6 +47,21 @@ if os.environ.get('INSPECT_ONLY') == 'true':
     print(json.dumps(summary, indent=2))
     raise SystemExit(0)
 if project['status'] == 'draft':
+    patch = {'source_url': source_url}
+    if not project.get('body', '').strip():
+        patch['body'] = Path('.github/staging/modrinth-description.md').read_text()
+    if project.get('license', {}).get('id') == 'LicenseRef-Unknown':
+        patch['license_id'] = 'Apache-2.0'
+    if not project.get('categories'):
+        patch['categories'] = ['utility']
+    if not project.get('issues_url'):
+        patch['issues_url'] = source_url + '/issues'
+    request('project/' + project_id, patch)
+    validation = request('project/' + project_id + '/validate', api_version='v3')
+    print(json.dumps(validation, indent=2))
+    output = Path('build/modrinth-release')
+    output.mkdir(parents=True, exist_ok=True)
+    (output / 'review-status.json').write_text(json.dumps({'project_id': project_id, 'validation': validation}, indent=2) + '\n')
     request('project/' + project_id, {'status': 'processing', 'requested_status': 'approved',
                                      'source_url': source_url})
 project = request('project/' + project_id)
