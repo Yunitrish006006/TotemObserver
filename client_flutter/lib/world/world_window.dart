@@ -11,7 +11,9 @@ class ChunkKey {
 
   @override
   bool operator ==(Object other) {
-    if (other is! ChunkKey) return false;
+    if (other is! ChunkKey) {
+      return false;
+    }
     return other.dimension == dimension && other.x == x && other.z == z;
   }
 
@@ -57,7 +59,9 @@ class WorldWindow {
   }
 
   bool contains(ChunkKey key) {
-    if (key.dimension != dimension) return false;
+    if (key.dimension != dimension) {
+      return false;
+    }
     final dx = (key.x - centerChunkX).abs();
     final dz = (key.z - centerChunkZ).abs();
     return dx <= radius && dz <= radius;
@@ -72,25 +76,49 @@ class WorldWindow {
     final radius = message['radius'];
     final revision = message['revision'];
 
-    if (message['type'] != 'world_window' || message['play'] != false) {
+    if (message['type'] != 'world_window') {
       throw const FormatException();
     }
-    if (protocol != 1 || sessionEpoch is! int || sessionEpoch <= 0) {
+    if (message['play'] != false) {
       throw const FormatException();
     }
-    if (dimension is! String || !_dimension.hasMatch(dimension)) {
+    if (protocol != 1) {
       throw const FormatException();
     }
-    if (centerChunkX is! int || !_validChunkCoordinate(centerChunkX)) {
+    if (sessionEpoch is! int) {
       throw const FormatException();
     }
-    if (centerChunkZ is! int || !_validChunkCoordinate(centerChunkZ)) {
+    if (sessionEpoch <= 0) {
       throw const FormatException();
     }
-    if (radius is! int || radius < 0 || radius > _maxRadius) {
+    if (dimension is! String) {
       throw const FormatException();
     }
-    if (revision is! int || revision <= 0) {
+    if (!_dimension.hasMatch(dimension)) {
+      throw const FormatException();
+    }
+    if (centerChunkX is! int) {
+      throw const FormatException();
+    }
+    if (!_validChunkCoordinate(centerChunkX)) {
+      throw const FormatException();
+    }
+    if (centerChunkZ is! int) {
+      throw const FormatException();
+    }
+    if (!_validChunkCoordinate(centerChunkZ)) {
+      throw const FormatException();
+    }
+    if (radius is! int) {
+      throw const FormatException();
+    }
+    if (radius < 0 || radius > _maxRadius) {
+      throw const FormatException();
+    }
+    if (revision is! int) {
+      throw const FormatException();
+    }
+    if (revision <= 0) {
       throw const FormatException();
     }
 
@@ -105,6 +133,7 @@ class WorldWindow {
     );
   }
 
-  static bool _validChunkCoordinate(int value) =>
-      value >= _minChunkCoordinate && value <= _maxChunkCoordinate;
+  static bool _validChunkCoordinate(int value) {
+    return value >= _minChunkCoordinate && value <= _maxChunkCoordinate;
+  }
 }
