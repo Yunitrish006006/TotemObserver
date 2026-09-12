@@ -99,17 +99,38 @@ try {
   await page.waitForFunction(() => document.querySelector('flt-semantics-placeholder') || document.querySelector('flt-semantics'));
   await page.evaluate(() => document.querySelector('flt-semantics-placeholder')?.click());
 
+  async function activateEditable(field, name) {
+    let lastError;
+    for (let attempt = 1; attempt <= 4; attempt++) {
+      // Flutter can leave the previous hidden editor focused while rebuilding semantics.
+      // Blurring first lets us prove that this click activated a fresh editable target.
+      await page.evaluate(() => {
+        const active = document.activeElement;
+        if (active instanceof HTMLElement) active.blur();
+      });
+      await field.click();
+      try {
+        await page.waitForFunction(() => {
+          const active = document.activeElement;
+          return (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement)
+            && !active.disabled && !active.readOnly;
+        }, null, { timeout: 2_500 });
+        return;
+      } catch (error) {
+        lastError = error;
+        await page.waitForTimeout(100 * attempt);
+      }
+    }
+    throw new Error(`Flutter editor did not activate for "${name}" after 4 focus attempts`, { cause: lastError });
+  }
+
   async function fill(name, value) {
     const field = page.getByRole('textbox', { name: new RegExp(name) });
-    await field.click();
-    // Flutter installs its editable DOM input after processing the focus event.
-    await page.waitForFunction(() => {
-      const active = document.activeElement;
-      return active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement;
-    });
+    await field.waitFor({ state: 'visible' });
+    await activateEditable(field, name);
     await page.keyboard.press('ControlOrMeta+A');
     await page.keyboard.insertText(value);
-    await page.waitForFunction(length => document.activeElement?.value?.length === length, value.length);
+    await page.waitForFunction(expected => document.activeElement?.value === expected, value);
     await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   }
   async function label(text) {
