@@ -38,6 +38,7 @@ class ObserverPlaySessionServiceTest {
             assertTrue(service.valid(authenticationB, replacement));
             assertEquals(first.identity(), replacement.identity());
             assertNotEquals(first.epoch(), replacement.epoch());
+            assertTrue(replacement.epoch() <= ObserverPlaySessionService.MAX_JSON_SAFE_EPOCH);
 
             service.release(first);
             assertTrue(service.valid(authenticationB, replacement));
