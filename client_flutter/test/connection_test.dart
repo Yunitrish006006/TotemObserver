@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:totem_observer_client/connection.dart';
@@ -92,10 +93,7 @@ void main() {
     expect(connection.playerAttached, isTrue);
     expect(connection.hasWorldState, isTrue);
     expect(find.text('已收到 1 次連線回應'), findsOneWidget);
-    expect(
-      find.text('已取得伺服器權威角色快照；區塊同步、畫面與遊戲操作仍未啟用。'),
-      findsOneWidget,
-    );
+    expect(find.text('已取得伺服器權威角色快照；區塊同步、畫面與遊戲操作仍未啟用。'), findsOneWidget);
     await tester.tap(find.widgetWithText(ElevatedButton, '登出'));
     await tester.pump();
     expect(socket.closed, isTrue);
