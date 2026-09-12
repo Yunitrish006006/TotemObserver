@@ -100,7 +100,10 @@ void main() {
     expect(find.text('角色狀態：已接入 Minecraft 玩家清單'), findsOneWidget);
     expect(find.text('世界維度：minecraft:overworld'), findsOneWidget);
     expect(find.text('初始位置：-5.50, 142.00, -5.50'), findsOneWidget);
-    expect(find.text('區塊視窗：中心 -1, -1；半徑 1（9 個 chunk identity）'), findsOneWidget);
+    expect(
+      find.text('區塊視窗：中心 -1, -1；半徑 1（9 個 chunk identity）'),
+      findsOneWidget,
+    );
     expect(connection.sessionEpoch, 42);
     expect(connection.playerAttached, isTrue);
     expect(connection.world?.dimension, 'minecraft:overworld');
@@ -221,7 +224,9 @@ void main() {
     connection.dispose();
   });
 
-  testWidgets('rejects world window from a stale session epoch', (tester) async {
+  testWidgets('rejects world window from a stale session epoch', (
+    tester,
+  ) async {
     final socket = FakeTransport();
     final connection = ObserverConnection(open: (_) => socket);
     await connection.authenticate(
