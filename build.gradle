@@ -136,6 +136,20 @@ tutorialStep:none
     }
 }
 
+tasks.named('runGameTest').configure {
+    doFirst {
+        // Fabric GameTest defaults to max-players=1, but this suite intentionally exercises
+        // multiple concurrent Observer admissions. Keep production admission policy intact and
+        // give only the isolated GameTest server enough capacity for those tests.
+        File dir = file('build/run/gameTest')
+        dir.mkdirs()
+        new File(dir, 'server.properties').text = '''online-mode=false
+spawn-protection=0
+max-players=4
+'''
+    }
+}
+
 tasks.withType(Test).configureEach { useJUnitPlatform() }
 
 tasks.register('prepareAccountFixture') {
