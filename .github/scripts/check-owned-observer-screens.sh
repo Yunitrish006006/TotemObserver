@@ -28,8 +28,7 @@ expected_legacy_families="$(printf '%s\n' \
 actual_legacy_families="$(
   awk '
     /EXPECTED = Map\.of\(/ { capture=1; next }
-    capture && /\);/ { exit }
-    capture { print }
+    capture { print; if (/\);/) exit }
   ' "$legacy_registry" \
     | grep -oE '"[a-z0-9_.:-]+"' \
     | tr -d '"' \
