@@ -15,12 +15,10 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.network.CommonListenerCookie;
 import net.minecraft.util.ProblemReporter;
 import net.minecraft.world.level.storage.TagValueInput;
-import net.minecraft.world.level.storage.ValueInput;
 
 import java.util.ArrayList;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -66,11 +64,11 @@ public final class ObserverPlayerAdmissionService implements AutoCloseable {
         return result;
     }
 
+    /** Safe for the bridge I/O thread: authoritative membership is mirrored in a concurrent map. */
     public boolean valid(ObserverPlaySessionService.Session playSession, Admission admission) {
         if (closed || playSession == null || admission == null || !admission.playSession().equals(playSession)) return false;
         var current = active.get(playSession.account());
-        return current != null && current.admission().equals(admission)
-                && server.getPlayerList().getPlayer(admission.player().getUUID()) == admission.player();
+        return current != null && current.admission().equals(admission);
     }
 
     /** Removal is asynchronous when called from a Netty thread; PlayerList.remove performs the save. */
@@ -86,7 +84,7 @@ public final class ObserverPlayerAdmissionService implements AutoCloseable {
         var identity = playSession.identity();
         var playerList = server.getPlayerList();
 
-        var previous = active.remove(playSession.account());
+        var previous = active.get(playSession.account());
         if (previous != null) removeNow(previous);
 
         if (playerList.getPlayer(identity.uuid()) != null || playerList.getPlayerByName(identity.profileName()) != null) {
@@ -96,15 +94,12 @@ public final class ObserverPlayerAdmissionService implements AutoCloseable {
         var profile = new GameProfile(identity.uuid(), identity.profileName());
         var player = new ServerPlayer(server, server.overworld(), profile, ClientInformation.createDefault());
         var connection = new ObserverClientConnection();
-        Optional<ValueInput> loaded;
+        boolean placed = false;
         try (var problems = new ProblemReporter.ScopedCollector(player.problemPath(), TotemObserver.LOGGER)) {
-            loaded = playerList.loadPlayerData(player.nameAndId())
+            var loaded = playerList.loadPlayerData(player.nameAndId())
                     .map(tag -> TagValueInput.create(problems, player.registryAccess(), tag));
             loaded.ifPresent(player::load);
-        }
 
-        boolean placed = false;
-        try {
             playerList.placeNewPlayer(connection, player,
                     new CommonListenerCookie(profile, 0, player.clientInformation(), false));
             placed = true;
