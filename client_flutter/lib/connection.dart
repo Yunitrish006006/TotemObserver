@@ -43,7 +43,9 @@ class ObserverConnection extends ChangeNotifier {
       _lastPong = -1,
       _identityProtocol = 0,
       _worldStateProtocol = 0,
-      _pendingWorldStateSequence = -1;
+      _worldBootstrapProtocol = 0,
+      _pendingWorldStateSequence = -1,
+      _pendingWorldBootstrapSequence = -1;
   String? _login;
   String _expectedAccount = '';
   bool _hello = false, _disposed = false, _playerAdmissionAvailable = false;
@@ -56,9 +58,19 @@ class ObserverConnection extends ChangeNotifier {
   bool playerAttached = false;
   String worldDimension = '';
   double worldX = 0, worldY = 0, worldZ = 0, worldYaw = 0, worldPitch = 0;
+  String bootstrapDimension = '';
+  int bootstrapSubscriptionId = 0,
+      bootstrapRevision = 0,
+      bootstrapMinY = 0,
+      bootstrapHeight = 0,
+      bootstrapCenterChunkX = 0,
+      bootstrapCenterChunkZ = 0,
+      bootstrapRadius = 0;
   int replies = 0;
 
   bool get hasWorldState => worldDimension.isNotEmpty;
+  bool get hasWorldBootstrap =>
+      bootstrapDimension.isNotEmpty && bootstrapSubscriptionId > 0;
 
   Future<void> authenticate(
     String address,
@@ -145,13 +157,20 @@ class ObserverConnection extends ChangeNotifier {
               worldStateProtocol != 1) {
             throw const FormatException();
           }
-          if (worldStateProtocol == 1 &&
+          final worldBootstrapProtocol = message['worldBootstrapProtocol'];
+          if (worldBootstrapProtocol != null &&
+              worldBootstrapProtocol != 0 &&
+              worldBootstrapProtocol != 1) {
+            throw const FormatException();
+          }
+          if ((worldStateProtocol == 1 || worldBootstrapProtocol == 1) &&
               (playerAdmission != true || identityProtocol != 1)) {
             throw const FormatException();
           }
           _identityProtocol = identityProtocol == 1 ? 1 : 0;
           _playerAdmissionAvailable = playerAdmission == true;
           _worldStateProtocol = worldStateProtocol == 1 ? 1 : 0;
+          _worldBootstrapProtocol = worldBootstrapProtocol == 1 ? 1 : 0;
           _hello = true;
           _transport!.send(_login!);
           _login = null;
@@ -197,6 +216,9 @@ class ObserverConnection extends ChangeNotifier {
             const Duration(seconds: 5),
             (_) => ping(),
           );
+          if (_worldBootstrapProtocol == 1 && playerAttached) {
+            _requestWorldBootstrap();
+          }
           if (_worldStateProtocol == 1 && playerAttached) _requestWorldState();
           ping();
         case 'world_state':
@@ -239,6 +261,71 @@ class ObserverConnection extends ChangeNotifier {
           worldYaw = yaw.toDouble();
           worldPitch = pitch.toDouble();
           _notify();
+        case 'world_bootstrap':
+          final seq = message['seq'];
+          final epoch = message['sessionEpoch'];
+          final subscriptionId = message['subscriptionId'];
+          final revision = message['revision'];
+          final dimension = message['dimension'];
+          final minY = message['minY'];
+          final height = message['height'];
+          final centerChunkX = message['centerChunkX'];
+          final centerChunkZ = message['centerChunkZ'];
+          final radius = message['radius'];
+          if (phase != ConnectionPhase.connected ||
+              _worldBootstrapProtocol != 1 ||
+              !playerAttached ||
+              message['protocol'] != 1 ||
+              seq is! int ||
+              seq != _pendingWorldBootstrapSequence ||
+              epoch != sessionEpoch ||
+              subscriptionId is! int ||
+              subscriptionId <= 0 ||
+              revision is! int ||
+              revision <= 0 ||
+              dimension is! String ||
+              !RegExp(r'^[a-z0-9_.-]+:[a-z0-9_./-]+$').hasMatch(dimension) ||
+              minY is! int ||
+              minY < -4096 ||
+              minY > 4096 ||
+              height is! int ||
+              height <= 0 ||
+              height > 4096 ||
+              centerChunkX is! int ||
+              centerChunkX < -2000000 ||
+              centerChunkX > 2000000 ||
+              centerChunkZ is! int ||
+              centerChunkZ < -2000000 ||
+              centerChunkZ > 2000000 ||
+              radius is! int ||
+              radius < 0 ||
+              radius > 32) {
+            throw const FormatException();
+          }
+          if (bootstrapSubscriptionId == 0) {
+            if (revision != 1) throw const FormatException();
+          } else if (subscriptionId == bootstrapSubscriptionId) {
+            if (revision <= bootstrapRevision ||
+                dimension != bootstrapDimension ||
+                minY != bootstrapMinY ||
+                height != bootstrapHeight ||
+                radius != bootstrapRadius) {
+              throw const FormatException();
+            }
+          } else if (subscriptionId <= bootstrapSubscriptionId ||
+              revision != 1) {
+            throw const FormatException();
+          }
+          _pendingWorldBootstrapSequence = -1;
+          bootstrapSubscriptionId = subscriptionId;
+          bootstrapRevision = revision;
+          bootstrapDimension = dimension;
+          bootstrapMinY = minY;
+          bootstrapHeight = height;
+          bootstrapCenterChunkX = centerChunkX;
+          bootstrapCenterChunkZ = centerChunkZ;
+          bootstrapRadius = radius;
+          _notify();
         case 'pong':
           final seq = message['seq'];
           if (phase != ConnectionPhase.connected ||
@@ -279,6 +366,24 @@ class ObserverConnection extends ChangeNotifier {
     }
   }
 
+  void _requestWorldBootstrap() {
+    if (phase != ConnectionPhase.connected ||
+        _worldBootstrapProtocol != 1 ||
+        !playerAttached ||
+        _pendingWorldBootstrapSequence >= 0) {
+      return;
+    }
+    try {
+      final seq = _sequence++;
+      _pendingWorldBootstrapSequence = seq;
+      _transport?.send(jsonEncode({'type': 'world_bootstrap', 'seq': seq}));
+    } catch (_) {
+      _fail('連線已中斷');
+    }
+  }
+
+  void resyncWorld() => _requestWorldBootstrap();
+
   void ping() {
     if (phase != ConnectionPhase.connected) return;
     try {
@@ -316,8 +421,10 @@ class ObserverConnection extends ChangeNotifier {
     _expectedAccount = '';
     _identityProtocol = 0;
     _worldStateProtocol = 0;
+    _worldBootstrapProtocol = 0;
     _playerAdmissionAvailable = false;
     _pendingWorldStateSequence = -1;
+    _pendingWorldBootstrapSequence = -1;
     _sequence = 0;
     _lastPong = -1;
     replies = 0;
@@ -332,6 +439,14 @@ class ObserverConnection extends ChangeNotifier {
     worldZ = 0;
     worldYaw = 0;
     worldPitch = 0;
+    bootstrapDimension = '';
+    bootstrapSubscriptionId = 0;
+    bootstrapRevision = 0;
+    bootstrapMinY = 0;
+    bootstrapHeight = 0;
+    bootstrapCenterChunkX = 0;
+    bootstrapCenterChunkZ = 0;
+    bootstrapRadius = 0;
     phase = ConnectionPhase.offline;
     status = '尚未連線';
     _notify();

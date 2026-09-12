@@ -58,6 +58,19 @@ public final class ObserverPlayerAdmissionService implements AutoCloseable {
         }
     }
 
+    /** Dimension bounds and chunk-subscription center captured atomically on the Minecraft server thread. */
+    public record WorldBootstrap(String dimension, int minY, int height, int centerChunkX, int centerChunkZ) {
+        public WorldBootstrap {
+            Objects.requireNonNull(dimension, "dimension");
+            if (!dimension.matches("[a-z0-9_.-]+:[a-z0-9_./-]+")
+                    || minY < -4096 || minY > 4096 || height <= 0 || height > 4096
+                    || centerChunkX < -2_000_000 || centerChunkX > 2_000_000
+                    || centerChunkZ < -2_000_000 || centerChunkZ > 2_000_000) {
+                throw new IllegalArgumentException("Invalid world bootstrap");
+            }
+        }
+    }
+
     private record Active(Admission admission, ObserverClientConnection connection) {}
     private record Pending(ObserverPlaySessionService.Session playSession,
                            CompletableFuture<Admission> result,
@@ -110,6 +123,33 @@ public final class ObserverPlayerAdmissionService implements AutoCloseable {
                 result.complete(new WorldState(
                         player.level().dimension().identifier().toString(),
                         player.getX(), player.getY(), player.getZ(), player.getYRot(), player.getXRot()));
+            } catch (Throwable failure) {
+                result.completeExceptionally(failure);
+            }
+        });
+        return result;
+    }
+
+    /** Captures immutable dimension bounds and the current chunk-subscription center on the server thread. */
+    public CompletableFuture<WorldBootstrap> bootstrap(Admission admission) {
+        var result = new CompletableFuture<WorldBootstrap>();
+        if (admission == null) {
+            result.complete(null);
+            return result;
+        }
+        execute(() -> {
+            try {
+                if (!valid(admission.playSession(), admission)) {
+                    result.complete(null);
+                    return;
+                }
+                var player = admission.player();
+                var level = player.level();
+                int blockX = (int) Math.floor(player.getX());
+                int blockZ = (int) Math.floor(player.getZ());
+                result.complete(new WorldBootstrap(
+                        level.dimension().identifier().toString(), level.getMinY(), level.getHeight(),
+                        blockX >> 4, blockZ >> 4));
             } catch (Throwable failure) {
                 result.completeExceptionally(failure);
             }

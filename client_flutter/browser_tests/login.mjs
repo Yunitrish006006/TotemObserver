@@ -127,11 +127,25 @@ try {
   async function fill(name, value) {
     const field = page.getByRole('textbox', { name: new RegExp(name) });
     await field.waitFor({ state: 'visible' });
-    await activateEditable(field, name);
-    await page.keyboard.press('ControlOrMeta+A');
-    await page.keyboard.insertText(value);
-    await page.waitForFunction(expected => document.activeElement?.value === expected, value);
-    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    let lastError;
+    for (let attempt = 1; attempt <= 4; attempt++) {
+      await activateEditable(field, name);
+      await page.keyboard.press('ControlOrMeta+A');
+      await page.keyboard.insertText(value);
+      try {
+        await page.waitForFunction(expected => {
+          const active = document.activeElement;
+          return (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement)
+            && active.value === expected;
+        }, value, { timeout: 2_500 });
+        await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+        return;
+      } catch (error) {
+        lastError = error;
+        await page.waitForTimeout(100 * attempt);
+      }
+    }
+    throw new Error(`Flutter editor did not retain value for "${name}" after 4 attempts`, { cause: lastError });
   }
   async function label(text) {
     const normalized = text.replace(/\s+/g, '');
