@@ -45,6 +45,7 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
                     + ",\"playerAdmission\":" + (playerAdmissions != null)
                     + ",\"worldStateProtocol\":" + (playerAdmissions == null ? 0 : WORLD_STATE_PROTOCOL)
                     + ",\"worldBootstrapProtocol\":" + (playerAdmissions == null ? 0 : WORLD_BOOTSTRAP_PROTOCOL)
+                    + ",\"worldRegistryProtocol\":" + (playerAdmissions == null ? 0 : ObserverBlockStateRegistry.PROTOCOL)
                     + ",\"play\":false}");
             deadline = ctx.executor().schedule(() -> stop(ctx, "Login timed out"), 10, TimeUnit.SECONDS);
         } else if (selected && event instanceof IdleStateEvent) stop(ctx, "Connection idle");
@@ -84,7 +85,9 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
             boolean ping = "ping".equals(type);
             boolean worldState = "world_state".equals(type) && playerAdmissions != null;
             boolean worldBootstrap = "world_bootstrap".equals(type) && playerAdmissions != null;
-            if (!(ping || worldState || worldBootstrap) || !message.keySet().equals(Set.of("type", "seq"))) {
+            boolean worldRegistry = "world_registry".equals(type) && playerAdmissions != null;
+            Set<String> expectedKeys = worldRegistry ? Set.of("type", "seq", "offset") : Set.of("type", "seq");
+            if (!(ping || worldState || worldBootstrap || worldRegistry) || !message.keySet().equals(expectedKeys)) {
                 stop(ctx, "Unsupported operation"); return;
             }
             long next = Long.parseLong(message.get("seq"));
@@ -92,7 +95,8 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
             sequence = next;
             if (ping) send(ctx, "{\"type\":\"pong\",\"seq\":" + next + "}");
             else if (worldState) requestWorldState(ctx, next);
-            else requestWorldBootstrap(ctx, next);
+            else if (worldBootstrap) requestWorldBootstrap(ctx, next);
+            else sendWorldRegistry(ctx, next, Integer.parseInt(message.get("offset")));
         } catch (Exception ignored) { stop(ctx, "Invalid message"); }
     }
 
@@ -165,6 +169,17 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
                 + ",\"dimension\":\"" + snapshot.dimension() + "\",\"minY\":" + snapshot.minY()
                 + ",\"height\":" + snapshot.height() + ",\"centerChunkX\":" + snapshot.centerChunkX()
                 + ",\"centerChunkZ\":" + snapshot.centerChunkZ() + ",\"radius\":" + WORLD_BOOTSTRAP_RADIUS + "}");
+    }
+
+    private void sendWorldRegistry(ChannelHandlerContext ctx, long requestSequence, int offset) {
+        if (playerAdmission == null) { stop(ctx, "World registry unavailable"); return; }
+        var page = ObserverBlockStateRegistry.page(offset);
+        var states = new StringJoiner(",", "[", "]");
+        for (String state : page.states()) states.add("\"" + state + "\"");
+        send(ctx, "{\"type\":\"world_registry\",\"protocol\":" + ObserverBlockStateRegistry.PROTOCOL
+                + ",\"seq\":" + requestSequence + ",\"sessionEpoch\":" + playSession.epoch()
+                + ",\"fingerprint\":\"" + page.fingerprint() + "\",\"offset\":" + page.offset()
+                + ",\"total\":" + page.total() + ",\"states\":" + states + "}");
     }
 
     private void finishLogin(ChannelHandlerContext ctx, String name, boolean success) {
@@ -249,8 +264,8 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
             reader.beginObject();
             while (reader.hasNext()) {
                 String key = reader.nextName();
-                if (!Set.of("type", "username", "password", "seq").contains(key) || values.containsKey(key) || values.size() >= 3) throw new IllegalArgumentException();
-                if (key.equals("seq")) {
+                if (!Set.of("type", "username", "password", "seq", "offset").contains(key) || values.containsKey(key) || values.size() >= 3) throw new IllegalArgumentException();
+                if (key.equals("seq") || key.equals("offset")) {
                     if (reader.peek() != JsonToken.NUMBER) throw new IllegalArgumentException();
                     String value = reader.nextString();
                     if (!value.matches("0|[1-9][0-9]{0,8}")) throw new IllegalArgumentException();

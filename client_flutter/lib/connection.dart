@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
@@ -44,8 +45,11 @@ class ObserverConnection extends ChangeNotifier {
       _identityProtocol = 0,
       _worldStateProtocol = 0,
       _worldBootstrapProtocol = 0,
+      _worldRegistryProtocol = 0,
       _pendingWorldStateSequence = -1,
-      _pendingWorldBootstrapSequence = -1;
+      _pendingWorldBootstrapSequence = -1,
+      _pendingWorldRegistrySequence = -1,
+      _pendingWorldRegistryOffset = -1;
   String? _login;
   String _expectedAccount = '';
   bool _hello = false, _disposed = false, _playerAdmissionAvailable = false;
@@ -66,11 +70,17 @@ class ObserverConnection extends ChangeNotifier {
       bootstrapCenterChunkX = 0,
       bootstrapCenterChunkZ = 0,
       bootstrapRadius = 0;
+  String registryFingerprint = '';
+  int registryTotal = 0;
+  final Map<int, String> _blockStateNames = {};
   int replies = 0;
 
   bool get hasWorldState => worldDimension.isNotEmpty;
   bool get hasWorldBootstrap =>
       bootstrapDimension.isNotEmpty && bootstrapSubscriptionId > 0;
+  bool get hasWorldRegistry =>
+      registryFingerprint.isNotEmpty && registryTotal > 0;
+  String? blockStateName(int rawId) => _blockStateNames[rawId];
 
   Future<void> authenticate(
     String address,
@@ -133,7 +143,7 @@ class ObserverConnection extends ChangeNotifier {
 
   void _receive(dynamic data) {
     try {
-      if (data is! String || data.length > 2048) throw const FormatException();
+      if (data is! String || data.length > 8192) throw const FormatException();
       final message = jsonDecode(data) as Map<String, dynamic>;
       switch (message['type']) {
         case 'hello':
@@ -163,7 +173,15 @@ class ObserverConnection extends ChangeNotifier {
               worldBootstrapProtocol != 1) {
             throw const FormatException();
           }
-          if ((worldStateProtocol == 1 || worldBootstrapProtocol == 1) &&
+          final worldRegistryProtocol = message['worldRegistryProtocol'];
+          if (worldRegistryProtocol != null &&
+              worldRegistryProtocol != 0 &&
+              worldRegistryProtocol != 1) {
+            throw const FormatException();
+          }
+          if ((worldStateProtocol == 1 ||
+                  worldBootstrapProtocol == 1 ||
+                  worldRegistryProtocol == 1) &&
               (playerAdmission != true || identityProtocol != 1)) {
             throw const FormatException();
           }
@@ -171,6 +189,7 @@ class ObserverConnection extends ChangeNotifier {
           _playerAdmissionAvailable = playerAdmission == true;
           _worldStateProtocol = worldStateProtocol == 1 ? 1 : 0;
           _worldBootstrapProtocol = worldBootstrapProtocol == 1 ? 1 : 0;
+          _worldRegistryProtocol = worldRegistryProtocol == 1 ? 1 : 0;
           _hello = true;
           _transport!.send(_login!);
           _login = null;
@@ -218,6 +237,9 @@ class ObserverConnection extends ChangeNotifier {
           );
           if (_worldBootstrapProtocol == 1 && playerAttached) {
             _requestWorldBootstrap();
+          }
+          if (_worldRegistryProtocol == 1 && playerAttached) {
+            _requestWorldRegistry(0);
           }
           if (_worldStateProtocol == 1 && playerAttached) _requestWorldState();
           ping();
@@ -326,6 +348,58 @@ class ObserverConnection extends ChangeNotifier {
           bootstrapCenterChunkZ = centerChunkZ;
           bootstrapRadius = radius;
           _notify();
+        case 'world_registry':
+          final seq = message['seq'];
+          final epoch = message['sessionEpoch'];
+          final fingerprint = message['fingerprint'];
+          final offset = message['offset'];
+          final total = message['total'];
+          final states = message['states'];
+          if (phase != ConnectionPhase.connected ||
+              _worldRegistryProtocol != 1 ||
+              !playerAttached ||
+              message['protocol'] != 1 ||
+              seq is! int ||
+              seq != _pendingWorldRegistrySequence ||
+              epoch != sessionEpoch ||
+              fingerprint is! String ||
+              !RegExp(r'^[0-9a-f]{64}$').hasMatch(fingerprint) ||
+              offset is! int ||
+              offset != _pendingWorldRegistryOffset ||
+              offset < 0 ||
+              total is! int ||
+              total <= 0 ||
+              total > 1000000 ||
+              states is! List ||
+              states.isEmpty ||
+              states.length > 8 ||
+              offset + states.length > total) {
+            throw const FormatException();
+          }
+          final statePattern = RegExp(
+            r'^[a-z0-9_.-]+:[a-z0-9_./-]+(?:\[[a-z0-9_.,=:/-]+\])?$',
+          );
+          for (final state in states) {
+            if (state is! String ||
+                state.length > 512 ||
+                !statePattern.hasMatch(state)) {
+              throw const FormatException();
+            }
+          }
+          if (registryFingerprint.isEmpty) {
+            if (offset != 0) throw const FormatException();
+            registryFingerprint = fingerprint;
+            registryTotal = total;
+          } else if (fingerprint != registryFingerprint ||
+              total != registryTotal) {
+            throw const FormatException();
+          }
+          _pendingWorldRegistrySequence = -1;
+          _pendingWorldRegistryOffset = -1;
+          for (int i = 0; i < states.length; i++) {
+            _blockStateNames[offset + i] = states[i] as String;
+          }
+          _notify();
         case 'pong':
           final seq = message['seq'];
           if (phase != ConnectionPhase.connected ||
@@ -382,6 +456,36 @@ class ObserverConnection extends ChangeNotifier {
     }
   }
 
+  void _requestWorldRegistry(int offset) {
+    if (phase != ConnectionPhase.connected ||
+        _worldRegistryProtocol != 1 ||
+        !playerAttached ||
+        offset < 0 ||
+        _pendingWorldRegistrySequence >= 0) {
+      return;
+    }
+    try {
+      final seq = _sequence++;
+      _pendingWorldRegistrySequence = seq;
+      _pendingWorldRegistryOffset = offset;
+      _transport?.send(
+        jsonEncode({'type': 'world_registry', 'seq': seq, 'offset': offset}),
+      );
+    } catch (_) {
+      _fail('連線已中斷');
+    }
+  }
+
+  void requestBlockState(int rawId) {
+    if (!hasWorldRegistry ||
+        rawId < 0 ||
+        rawId >= registryTotal ||
+        _blockStateNames.containsKey(rawId)) {
+      return;
+    }
+    _requestWorldRegistry((rawId ~/ 8) * 8);
+  }
+
   void resyncWorld() => _requestWorldBootstrap();
 
   void ping() {
@@ -422,9 +526,12 @@ class ObserverConnection extends ChangeNotifier {
     _identityProtocol = 0;
     _worldStateProtocol = 0;
     _worldBootstrapProtocol = 0;
+    _worldRegistryProtocol = 0;
     _playerAdmissionAvailable = false;
     _pendingWorldStateSequence = -1;
     _pendingWorldBootstrapSequence = -1;
+    _pendingWorldRegistrySequence = -1;
+    _pendingWorldRegistryOffset = -1;
     _sequence = 0;
     _lastPong = -1;
     replies = 0;
@@ -447,6 +554,9 @@ class ObserverConnection extends ChangeNotifier {
     bootstrapCenterChunkX = 0;
     bootstrapCenterChunkZ = 0;
     bootstrapRadius = 0;
+    registryFingerprint = '';
+    registryTotal = 0;
+    _blockStateNames.clear();
     phase = ConnectionPhase.offline;
     status = '尚未連線';
     _notify();
