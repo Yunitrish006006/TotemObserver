@@ -32,6 +32,7 @@ const hello = {
   'playerIdentityProtocol': 1,
   'playerAdmission': true,
   'worldStateProtocol': 1,
+  'worldBootstrapProtocol': 1,
   'play': false,
 };
 const authenticated = {
@@ -44,10 +45,24 @@ const authenticated = {
   'playerAttached': true,
   'play': false,
 };
+const worldBootstrap = {
+  'type': 'world_bootstrap',
+  'protocol': 1,
+  'seq': 0,
+  'sessionEpoch': 42,
+  'subscriptionId': 1,
+  'revision': 1,
+  'dimension': 'minecraft:overworld',
+  'minY': -64,
+  'height': 384,
+  'centerChunkX': 0,
+  'centerChunkZ': -1,
+  'radius': 2,
+};
 const worldState = {
   'type': 'world_state',
   'protocol': 1,
-  'seq': 0,
+  'seq': 1,
   'sessionEpoch': 42,
   'dimension': 'minecraft:overworld',
   'x': 12.25,
@@ -58,7 +73,7 @@ const worldState = {
 };
 
 void main() {
-  testWidgets('login clears password, reads world snapshot and logs out', (
+  testWidgets('login reads world bootstrap, resyncs and logs out', (
     tester,
   ) async {
     final socket = FakeTransport();
@@ -74,10 +89,12 @@ void main() {
     socket.receive(hello);
     expect(jsonDecode(socket.sent.single)['password'], 'local-test-password');
     socket.receive(authenticated);
-    expect(jsonDecode(socket.sent[1]), {'type': 'world_state', 'seq': 0});
-    expect(jsonDecode(socket.sent[2]), {'type': 'ping', 'seq': 1});
+    expect(jsonDecode(socket.sent[1]), {'type': 'world_bootstrap', 'seq': 0});
+    expect(jsonDecode(socket.sent[2]), {'type': 'world_state', 'seq': 1});
+    expect(jsonDecode(socket.sent[3]), {'type': 'ping', 'seq': 2});
+    socket.receive(worldBootstrap);
     socket.receive(worldState);
-    socket.receive({'type': 'pong', 'seq': 1});
+    socket.receive({'type': 'pong', 'seq': 2});
     await tester.pump();
     expect(find.text('登入帳號：alice'), findsOneWidget);
     expect(find.text('玩家身分：obs_123456781234'), findsOneWidget);
@@ -92,8 +109,29 @@ void main() {
     expect(connection.sessionEpoch, 42);
     expect(connection.playerAttached, isTrue);
     expect(connection.hasWorldState, isTrue);
+    expect(connection.hasWorldBootstrap, isTrue);
+    expect(connection.bootstrapSubscriptionId, 1);
+    expect(connection.bootstrapRevision, 1);
+    expect(connection.bootstrapMinY, -64);
+    expect(connection.bootstrapHeight, 384);
+    expect(connection.bootstrapCenterChunkX, 0);
+    expect(connection.bootstrapCenterChunkZ, -1);
+    expect(connection.bootstrapRadius, 2);
     expect(find.text('已收到 1 次連線回應'), findsOneWidget);
     expect(find.text('已取得伺服器權威角色快照；區塊同步、畫面與遊戲操作仍未啟用。'), findsOneWidget);
+
+    connection.resyncWorld();
+    expect(jsonDecode(socket.sent.last), {'type': 'world_bootstrap', 'seq': 3});
+    socket.receive({
+      ...worldBootstrap,
+      'seq': 3,
+      'revision': 2,
+      'centerChunkX': 1,
+    });
+    expect(connection.bootstrapSubscriptionId, 1);
+    expect(connection.bootstrapRevision, 2);
+    expect(connection.bootstrapCenterChunkX, 1);
+
     await tester.tap(find.widgetWithText(ElevatedButton, '登出'));
     await tester.pump();
     expect(socket.closed, isTrue);
@@ -102,6 +140,7 @@ void main() {
     expect(connection.playerUuid, isEmpty);
     expect(connection.playerAttached, isFalse);
     expect(connection.hasWorldState, isFalse);
+    expect(connection.hasWorldBootstrap, isFalse);
     connection.dispose();
   });
 
@@ -182,7 +221,7 @@ void main() {
     connection.dispose();
   });
 
-  testWidgets('rejects world-state capability without identity contract', (
+  testWidgets('rejects world capability without identity contract', (
     tester,
   ) async {
     final socket = FakeTransport();
@@ -214,6 +253,25 @@ void main() {
     socket.receive({...worldState, 'sessionEpoch': 41});
     expect(connection.phase, ConnectionPhase.offline);
     expect(connection.hasWorldState, isFalse);
+    expect(connection.status, '伺服器回應不相容，請重新連線');
+    connection.dispose();
+  });
+
+  testWidgets('rejects invalid initial world bootstrap revision', (
+    tester,
+  ) async {
+    final socket = FakeTransport();
+    final connection = ObserverConnection(open: (_) => socket);
+    await connection.authenticate(
+      'ws://127.0.0.1:25580/observer/bridge',
+      'alice',
+      'local-test-password',
+    );
+    socket.receive(hello);
+    socket.receive(authenticated);
+    socket.receive({...worldBootstrap, 'revision': 2});
+    expect(connection.phase, ConnectionPhase.offline);
+    expect(connection.hasWorldBootstrap, isFalse);
     expect(connection.status, '伺服器回應不相容，請重新連線');
     connection.dispose();
   });
