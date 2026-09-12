@@ -2,6 +2,7 @@ package dev.totem.observer.bridge;
 
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 
@@ -140,7 +141,17 @@ public final class ObserverBridgeGameTest {
                             .subprotocols(authenticated ? ObserverAuthenticatedExchange.PROTOCOL : ObserverBridgeServer.PROTOCOL)
                             .buildAsync(URI.create("ws://127.0.0.1:" + port + ObserverBridgeServer.PATH), listener)
                             .get(5, TimeUnit.SECONDS);
-                    try { pong.get(9, TimeUnit.SECONDS); } finally { socket.abort(); }
+                    try {
+                        pong.get(9, TimeUnit.SECONDS);
+                        if (authenticated) {
+                            UUID expectedId = ObserverPlayerIdentity.forAccount("gametest").uuid();
+                            awaitPlayerPresence(server, expectedId, true);
+                            socket.abort();
+                            awaitPlayerPresence(server, expectedId, false);
+                        }
+                    } finally {
+                        if (!socket.isOutputClosed()) socket.abort();
+                    }
                 }
             } catch (Exception e) { throw new CompletionException(e); }
             finally {
@@ -154,5 +165,22 @@ public final class ObserverBridgeGameTest {
             if (!result.isDone()) helper.fail("Waiting for bridge exchange");
             result.join();
         }).thenSucceed();
+    }
+
+    private static void awaitPlayerPresence(MinecraftServer server, UUID playerId, boolean expected) throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (System.nanoTime() < deadline) {
+            var check = new CompletableFuture<Boolean>();
+            server.execute(() -> {
+                try {
+                    check.complete((server.getPlayerList().getPlayer(playerId) != null) == expected);
+                } catch (Throwable failure) {
+                    check.completeExceptionally(failure);
+                }
+            });
+            if (check.get(2, TimeUnit.SECONDS)) return;
+            Thread.sleep(20L);
+        }
+        throw new IllegalStateException("Timed out waiting for Observer player presence=" + expected);
     }
 }

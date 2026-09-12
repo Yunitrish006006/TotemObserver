@@ -88,7 +88,7 @@ public final class ObserverBridgeAdmissionE2eCoordinator implements ModInitializ
 
                 if (!releasedMarked) {
                     marker("server-bridge-player-released.txt",
-                            "Server removed account-v1 player after WebSocket release.\n");
+                            "Server removed account-v1 player after authenticated logout.\n");
                     releasedMarked = true;
                     return;
                 }
@@ -133,12 +133,13 @@ public final class ObserverBridgeAdmissionE2eCoordinator implements ModInitializ
             }
 
             marker("server-bridge-player-release-requested.txt",
-                    "Closing account-v1 socket after Target proved player visibility.\n");
+                    "Logging out account-v1 session after Target proved player visibility.\n");
             releaseRequested = true;
             releaseTick = ticks;
             stopHeartbeat();
             WebSocket current = socket;
-            if (current != null) current.sendClose(WebSocket.NORMAL_CLOSURE, "e2e complete");
+            if (current == null) throw new IllegalStateException("Account-v1 socket disappeared before logout");
+            current.sendText("{\"type\":\"logout\"}", true);
         } catch (CompletionException failure) {
             fail(failure.getCause() == null ? failure : failure.getCause());
         } catch (Throwable failure) {
@@ -236,7 +237,7 @@ public final class ObserverBridgeAdmissionE2eCoordinator implements ModInitializ
                 startHeartbeat();
                 return;
             }
-            if ("pong".equals(type)) return;
+            if ("pong".equals(type) || "logged_out".equals(type)) return;
             if ("auth_failed".equals(type)) {
                 throw new IllegalStateException("E2E account registration was rejected");
             }
