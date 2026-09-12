@@ -64,6 +64,7 @@ public final class ObserverPlayerAdmissionService implements AutoCloseable {
                 if (closed) { result.complete(null); return; }
                 result.complete(openNow(playSession));
             } catch (Throwable failure) {
+                TotemObserver.LOGGER.warn("Observer player admission failed for account {}", playSession.account(), failure);
                 result.completeExceptionally(failure);
             }
         });
