@@ -14,6 +14,38 @@ for contract in ObserverReadOnlyScreen ObserverOwnedScreenCoordinator ObserverOw
   grep -ERq -- "$contract" "$root/src/main" || { echo "Missing Observer ownership contract: $contract" >&2; exit 1; }
 done
 
+# The central protocol table exists only for compatibility with feature-specific transports
+# that predate ObserverOwnedScreenPayloads. New module-owned families must negotiate through
+# their TotemCore ObserverScreenProvider identity and must not grow this registry.
+legacy_registry="$root/src/main/java/dev/totem/observer/network/ObserverOwnedScreenProtocols.java"
+expected_legacy_families="$(printf '%s\n' \
+  automata_copper_golem \
+  locksmith_management \
+  nexus \
+  nexus_death_node_admin \
+  remnant_backpack \
+  villagers_woodcutter | sort)"
+actual_legacy_families="$(
+  awk '
+    /EXPECTED = Map\.of\(/ { capture=1; next }
+    capture && /\);/ { exit }
+    capture { print }
+  ' "$legacy_registry" \
+    | grep -oE '"[a-z0-9_.:-]+"' \
+    | tr -d '"' \
+    | sort -u
+)"
+if [[ "$actual_legacy_families" != "$expected_legacy_families" ]]; then
+  echo 'Observer legacy owned-screen registry changed.' >&2
+  echo 'Do not centrally register new module-owned families; use ObserverScreenProvider + ObserverOwnedScreenPayloads.' >&2
+  diff -u <(printf '%s\n' "$expected_legacy_families") <(printf '%s\n' "$actual_legacy_families") || true
+  exit 1
+fi
+
+grep -Fq 'newFeatureProviderDoesNotNeedCentralFamilyRegistration' \
+  "$root/src/test/java/dev/totem/observer/runtime/ObserverOwnedScreenProtocolTest.java" \
+  || { echo 'Missing generic owned-screen provider regression test.' >&2; exit 1; }
+
 declare -A owner_screens=(
   [TotemRemnant]='BackpackScreen'
   [TotemAutomata]='CopperGolemMenuScreen'
