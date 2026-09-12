@@ -184,6 +184,23 @@ void main() {
     connection.dispose();
   });
 
+  testWidgets('rejects world-state capability without identity contract', (
+    tester,
+  ) async {
+    final socket = FakeTransport();
+    final connection = ObserverConnection(open: (_) => socket);
+    await connection.authenticate(
+      'ws://127.0.0.1:25580/observer/bridge',
+      'alice',
+      'local-test-password',
+    );
+    socket.receive({...hello, 'playerIdentityProtocol': null});
+    expect(connection.phase, ConnectionPhase.offline);
+    expect(socket.sent, isEmpty);
+    expect(connection.status, '伺服器回應不相容，請重新連線');
+    connection.dispose();
+  });
+
   testWidgets('rejects world snapshot for the wrong request or session', (
     tester,
   ) async {
