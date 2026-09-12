@@ -11,12 +11,13 @@ import java.util.*;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 
-/** Account-v1 connection state machine; world streaming and browser gameplay remain disabled. */
+/** Account-v1 connection state machine; browser gameplay remains disabled. */
 final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<WebSocketFrame> {
     static final String PROTOCOL = "totem-observer-account-v1";
     private final ObserverAccountService accounts;
     private final ObserverPlaySessionService playSessions;
     private final ObserverPlayerAdmissionService playerAdmissions;
+    private final ObserverWorldBootstrapService worldBootstrap;
     private ObserverAccountService.Session session;
     private ObserverPlaySessionService.Session playSession;
     private ObserverPlayerAdmissionService.Admission playerAdmission;
@@ -26,18 +27,26 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
 
     ObserverAuthenticatedExchange(ObserverAccountService accounts, ObserverPlaySessionService playSessions,
                                   ObserverPlayerAdmissionService playerAdmissions) {
+        this(accounts, playSessions, playerAdmissions, null);
+    }
+
+    ObserverAuthenticatedExchange(ObserverAccountService accounts, ObserverPlaySessionService playSessions,
+                                  ObserverPlayerAdmissionService playerAdmissions,
+                                  ObserverWorldBootstrapService worldBootstrap) {
         this.accounts = accounts;
         this.playSessions = playSessions;
         this.playerAdmissions = playerAdmissions;
+        this.worldBootstrap = worldBootstrap;
     }
 
     @Override public void userEventTriggered(ChannelHandlerContext ctx, Object event) {
         if (event instanceof WebSocketServerProtocolHandler.HandshakeComplete handshake && PROTOCOL.equals(handshake.selectedSubprotocol())) {
             selected = true;
             ctx.channel().attr(ObserverBridgeServer.READY).set(true);
+            String worldCapability = worldBootstrap == null ? "" : ",\"worldProtocol\":" + ObserverWorldBootstrapService.PROTOCOL;
             send(ctx, "{\"type\":\"hello\",\"protocol\":1,\"authentication\":true,\"registration\":" + accounts.registrationAllowed()
                     + ",\"playerIdentityProtocol\":" + ObserverPlaySessionService.PROTOCOL
-                    + ",\"playerAdmission\":" + (playerAdmissions != null) + ",\"play\":false}");
+                    + ",\"playerAdmission\":" + (playerAdmissions != null) + worldCapability + ",\"play\":false}");
             deadline = ctx.executor().schedule(() -> stop(ctx, "Login timed out"), 10, TimeUnit.SECONDS);
         } else if (selected && event instanceof IdleStateEvent) stop(ctx, "Connection idle");
         else ctx.fireUserEventTriggered(event);
@@ -133,6 +142,32 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
                 + "\",\"playerName\":\"" + identity.profileName()
                 + "\",\"sessionEpoch\":" + playSession.epoch()
                 + ",\"playerAttached\":" + attached + ",\"play\":false}");
+        if (attached && worldBootstrap != null) {
+            worldBootstrap.capture(playerAdmission).whenComplete((snapshot, failure) -> {
+                try {
+                    ctx.executor().execute(() -> finishWorldBootstrap(ctx, snapshot, failure));
+                } catch (RejectedExecutionException ignored) { }
+            });
+        }
+    }
+
+    private void finishWorldBootstrap(ChannelHandlerContext ctx,
+                                      ObserverWorldBootstrapService.Snapshot snapshot, Throwable failure) {
+        if (ended || !ctx.channel().isActive()) return;
+        if (failure != null || snapshot == null
+                || !accounts.valid(session) || !playSessions.valid(session, playSession)
+                || !playerAdmissions.valid(playSession, playerAdmission)
+                || snapshot.sessionEpoch() != playSession.epoch()) {
+            stop(ctx, "World bootstrap failed");
+            return;
+        }
+        send(ctx, "{\"type\":\"world_bootstrap\",\"protocol\":" + ObserverWorldBootstrapService.PROTOCOL
+                + ",\"sessionEpoch\":" + snapshot.sessionEpoch()
+                + ",\"dimension\":\"" + snapshot.dimension()
+                + "\",\"x\":" + snapshot.x() + ",\"y\":" + snapshot.y() + ",\"z\":" + snapshot.z()
+                + ",\"yaw\":" + snapshot.yaw() + ",\"pitch\":" + snapshot.pitch()
+                + ",\"gameTime\":" + snapshot.gameTime() + ",\"dayTime\":" + snapshot.dayTime()
+                + ",\"play\":false}");
     }
 
     private void failLogin(ChannelHandlerContext ctx) {

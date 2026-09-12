@@ -89,6 +89,7 @@ class _ConnectionPageState extends State<ConnectionPage> {
               builder: (context, _) {
                 final online = connection.phase == ConnectionPhase.connected;
                 final busy = connection.phase == ConnectionPhase.connecting;
+                final world = connection.world;
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
@@ -144,6 +145,23 @@ class _ConnectionPageState extends State<ConnectionPage> {
                           textAlign: TextAlign.center,
                         ),
                       ],
+                      if (world != null) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          '世界維度：${world.dimension}',
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '初始位置：${world.x.toStringAsFixed(2)}, ${world.y.toStringAsFixed(2)}, ${world.z.toStringAsFixed(2)}',
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 4),
+                        const Text(
+                          '世界核心：bootstrap v1（尚未包含區塊與操作）',
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
                       const SizedBox(height: 8),
                       Text(
                         '已收到 ${connection.replies} 次連線回應',
@@ -151,7 +169,9 @@ class _ConnectionPageState extends State<ConnectionPage> {
                       ),
                       const SizedBox(height: 16),
                       Text(
-                        connection.playerAttached
+                        world != null
+                            ? '已取得伺服器權威的初始世界狀態；區塊畫面、實體同步與遊戲操作仍在開發中。'
+                            : connection.playerAttached
                             ? '角色已存在於伺服器世界並使用原版 playerdata；區塊畫面與遊戲操作仍在開發中。'
                             : '已完成帳號與固定玩家身分綁定；進入 Minecraft 世界功能尚在開發中。',
                         textAlign: TextAlign.center,
