@@ -3,7 +3,15 @@ package dev.totem.observer.network;
 import java.util.Map;
 import java.util.Set;
 
-/** Server-controlled screen protocol registry, independent from the generic transport version. */
+/**
+ * Frozen compatibility table for feature-specific transports that predate the generic
+ * {@link ObserverOwnedScreenPayloads} provider transport.
+ *
+ * <p>Do not register new module-owned families here. New providers advertise their exact
+ * {@code familyId + protocolVersion} through TotemCore and negotiate through
+ * {@link ObserverOwnedProviderPolicy} / {@link ObserverOwnedScreenPayloads}. Entries in this
+ * table exist only while their legacy compatibility paths remain supported.</p>
+ */
 public final class ObserverOwnedScreenProtocols {
     private static final Map<String, Integer> EXPECTED = Map.of(
             "remnant_backpack", 1,
