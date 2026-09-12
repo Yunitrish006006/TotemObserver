@@ -54,7 +54,7 @@ final class ObserverWorldBootstrapService {
                         level.dimension().identifier().toString(),
                         player.getX(), player.getY(), player.getZ(),
                         player.getYRot(), player.getXRot(),
-                        level.getGameTime(), level.getDayTime()));
+                        level.getGameTime(), level.getLevelData().getDayTime()));
             } catch (Throwable failure) {
                 result.completeExceptionally(failure);
             }
