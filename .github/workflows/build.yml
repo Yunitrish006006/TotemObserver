@@ -108,3 +108,4 @@ jobs:
             echo 'Framebuffer transport code entered TotemObserver.' >&2
             exit 1
           fi
+          bash .github/scripts/check-owned-observer-screens.sh .
