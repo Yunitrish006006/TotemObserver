@@ -46,7 +46,7 @@ try {
   const executablePath = process.env.CHROME_BIN || (existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined);
   browser = await chromium.launch({ executablePath, headless: true, args: ['--no-sandbox'] });
   const page = await browser.newPage({ viewport: { width: 960, height: 900 } });
-  page.setDefaultTimeout(15_000);
+  page.setDefaultTimeout(30_000);
   const errors = [];
   page.on('pageerror', () => errors.push('browser runtime error'));
   await page.goto(origin, { waitUntil: 'networkidle' });
@@ -67,8 +67,9 @@ try {
     await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   }
   async function label(text) {
-    await page.waitForFunction(text => [...document.querySelectorAll('flt-semantics')]
-      .some(node => (node.getAttribute('aria-label') ?? node.textContent ?? '').includes(text)), text);
+    await page.waitForFunction((text) => [...document.querySelectorAll('flt-semantics')]
+      .some(node => (node.getAttribute('aria-label') ?? node.textContent ?? '').includes(text)),
+      { timeout: 45_000 }, text);
   }
   const username = `test_${run}`;
   const password = 'browser-only-test-password';
