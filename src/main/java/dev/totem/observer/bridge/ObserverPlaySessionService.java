@@ -12,6 +12,7 @@ import java.util.UUID;
  */
 public final class ObserverPlaySessionService implements AutoCloseable {
     public static final int PROTOCOL = 1;
+    static final long MAX_JSON_SAFE_EPOCH = (1L << 53) - 1;
 
     public record Session(String account, UUID authenticationSessionId, long epoch,
                           ObserverPlayerIdentity identity) {
@@ -20,7 +21,7 @@ public final class ObserverPlaySessionService implements AutoCloseable {
             Objects.requireNonNull(authenticationSessionId, "authenticationSessionId");
             Objects.requireNonNull(identity, "identity");
             if (!account.equals(identity.account())) throw new IllegalArgumentException("Identity account mismatch");
-            if (epoch <= 0) throw new IllegalArgumentException("Invalid epoch");
+            if (epoch <= 0 || epoch > MAX_JSON_SAFE_EPOCH) throw new IllegalArgumentException("Invalid epoch");
         }
     }
 
@@ -32,7 +33,7 @@ public final class ObserverPlaySessionService implements AutoCloseable {
         if (closed) return null;
         var identity = ObserverPlayerIdentity.forAccount(authentication.account());
         long epoch = (authentication.id().getMostSignificantBits() ^ authentication.id().getLeastSignificantBits())
-                & Long.MAX_VALUE;
+                & MAX_JSON_SAFE_EPOCH;
         if (epoch == 0) epoch = 1;
         var session = new Session(authentication.account(), authentication.id(), epoch, identity);
         active.put(authentication.account(), session);
