@@ -52,6 +52,21 @@ jobs:
           core_jar="${GITHUB_WORKSPACE}/.lockstep/TotemCore/build/libs/totem-core-${core_version}.jar"
           ./gradlew -PtotemCoreJar="$core_jar" clean test assemble compileGametestJava runGameTest prepareAccountFixture --no-daemon --stacktrace
 
+      - name: Store JVM and GameTest failure reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: observer-jvm-gametest-reports
+          if-no-files-found: warn
+          path: |
+            build/junit.xml
+            build/reports/
+            build/test-results/
+            build/gametest/logs/
+            build/gametest/crash-reports/
+            build/run/gameTest/logs/
+            build/run/gameTest/crash-reports/
+
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
