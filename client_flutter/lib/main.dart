@@ -136,6 +136,13 @@ class _ConnectionPageState extends State<ConnectionPage> {
                           '角色 UUID：${connection.playerUuid}',
                           textAlign: TextAlign.center,
                         ),
+                        const SizedBox(height: 4),
+                        Text(
+                          connection.playerAttached
+                              ? '角色狀態：已接入 Minecraft 玩家清單'
+                              : '角色狀態：僅保留玩家身分',
+                          textAlign: TextAlign.center,
+                        ),
                       ],
                       const SizedBox(height: 8),
                       Text(
@@ -143,8 +150,10 @@ class _ConnectionPageState extends State<ConnectionPage> {
                         textAlign: TextAlign.center,
                       ),
                       const SizedBox(height: 16),
-                      const Text(
-                        '已完成帳號與固定玩家身分綁定；進入 Minecraft 世界功能尚在開發中。',
+                      Text(
+                        connection.playerAttached
+                            ? '角色已存在於伺服器世界並使用原版 playerdata；區塊畫面與遊戲操作仍在開發中。'
+                            : '已完成帳號與固定玩家身分綁定；進入 Minecraft 世界功能尚在開發中。',
                         textAlign: TextAlign.center,
                       ),
                       const SizedBox(height: 24),
