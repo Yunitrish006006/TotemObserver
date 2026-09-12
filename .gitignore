@@ -2,6 +2,11 @@
 build/
 out/
 run/
+# Local Minecraft server runtime files
+/.fabric/
+/logs/
+/eula.txt
+/server.properties
 .lockstep/
 .idea/
 .vscode/
