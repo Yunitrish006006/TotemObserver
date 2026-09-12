@@ -166,7 +166,7 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
                 + ",\"dimension\":\"" + snapshot.dimension()
                 + "\",\"x\":" + snapshot.x() + ",\"y\":" + snapshot.y() + ",\"z\":" + snapshot.z()
                 + ",\"yaw\":" + snapshot.yaw() + ",\"pitch\":" + snapshot.pitch()
-                + ",\"gameTime\":" + snapshot.gameTime() + ",\"dayTime\":" + snapshot.dayTime()
+                + ",\"gameTime\":" + snapshot.gameTime() + ",\"defaultClockTime\":" + snapshot.defaultClockTime()
                 + ",\"play\":false}");
     }
 

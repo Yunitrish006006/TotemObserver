@@ -9,7 +9,7 @@ class WorldBootstrap {
     required this.yaw,
     required this.pitch,
     required this.gameTime,
-    required this.dayTime,
+    required this.defaultClockTime,
   });
 
   final int protocol;
@@ -21,7 +21,7 @@ class WorldBootstrap {
   final double yaw;
   final double pitch;
   final int gameTime;
-  final int dayTime;
+  final int defaultClockTime;
 
   static final RegExp _dimension = RegExp(r'^[a-z0-9_.-]+:[a-z0-9/._-]+$');
 
@@ -35,7 +35,7 @@ class WorldBootstrap {
     final yaw = message['yaw'];
     final pitch = message['pitch'];
     final gameTime = message['gameTime'];
-    final dayTime = message['dayTime'];
+    final defaultClockTime = message['defaultClockTime'];
     if (message['type'] != 'world_bootstrap' ||
         message['play'] != false ||
         protocol != 1 ||
@@ -49,7 +49,7 @@ class WorldBootstrap {
         yaw is! num ||
         pitch is! num ||
         gameTime is! int ||
-        dayTime is! int) {
+        defaultClockTime is! int) {
       throw const FormatException();
     }
     final px = x.toDouble();
@@ -74,7 +74,7 @@ class WorldBootstrap {
       yaw: viewYaw,
       pitch: viewPitch,
       gameTime: gameTime,
-      dayTime: dayTime,
+      defaultClockTime: defaultClockTime,
     );
   }
 }

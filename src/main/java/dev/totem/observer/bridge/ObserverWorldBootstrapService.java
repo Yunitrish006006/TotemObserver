@@ -18,7 +18,7 @@ final class ObserverWorldBootstrapService {
 
     record Snapshot(long sessionEpoch, String dimension,
                     double x, double y, double z, float yaw, float pitch,
-                    long gameTime, long dayTime) {
+                    long gameTime, long defaultClockTime) {
         Snapshot {
             if (sessionEpoch <= 0 || dimension == null || dimension.isBlank()) {
                 throw new IllegalArgumentException("Invalid world bootstrap identity");
@@ -27,7 +27,7 @@ final class ObserverWorldBootstrapService {
                     || !Float.isFinite(yaw) || !Float.isFinite(pitch)) {
                 throw new IllegalArgumentException("Invalid world bootstrap pose");
             }
-            if (!safeInteger(gameTime) || !safeInteger(dayTime)) {
+            if (!safeInteger(gameTime) || !safeInteger(defaultClockTime)) {
                 throw new IllegalArgumentException("World time exceeds browser integer range");
             }
         }
@@ -54,7 +54,7 @@ final class ObserverWorldBootstrapService {
                         level.dimension().identifier().toString(),
                         player.getX(), player.getY(), player.getZ(),
                         player.getYRot(), player.getXRot(),
-                        level.getGameTime(), level.getLevelData().getDayTime()));
+                        level.getGameTime(), level.getDefaultClockTime()));
             } catch (Throwable failure) {
                 result.completeExceptionally(failure);
             }

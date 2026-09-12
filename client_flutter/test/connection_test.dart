@@ -54,7 +54,7 @@ const worldBootstrap = {
   'yaw': 90.0,
   'pitch': 0.0,
   'gameTime': 1200,
-  'dayTime': 1200,
+  'defaultClockTime': 1200,
   'play': false,
 };
 
@@ -91,6 +91,7 @@ void main() {
     expect(connection.sessionEpoch, 42);
     expect(connection.playerAttached, isTrue);
     expect(connection.world?.dimension, 'minecraft:overworld');
+    expect(connection.world?.defaultClockTime, 1200);
     expect(connection.status, '玩家已接入 Minecraft，世界核心已同步');
     expect(find.text('已收到 1 次連線回應'), findsOneWidget);
     await tester.tap(find.widgetWithText(ElevatedButton, '登出'));
