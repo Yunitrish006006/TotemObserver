@@ -12,13 +12,13 @@ TotemObserver owns the cross-cutting runtime behind `/observeui`: server-authori
 - Java 25
 - Fabric Loader / Fabric API
 - TotemCore `>=0.7.18 <0.8.0`
-- module version `0.1.2`
+- module version `0.1.3`
 
 ## Ownership model
 
 `TotemCore` owns the stable Observer contracts such as `ObserverScreenProvider`, provider discovery, snapshots, contexts and read-only handles. TotemObserver owns transport, negotiation, session/runtime behavior and vanilla Screen adapters. Feature modules such as TotemNexus, TotemRemnant and TotemAutomata continue to own their production Screen providers.
 
-A feature module provider is discovered through the TotemCore entrypoint. Module-owned Screens negotiate through a generic bounded transport and an exact `familyId + protocolVersion` match, so adding a future provider such as `alchemy_cauldron` does not require adding TotemAlchemy knowledge to TotemObserver.
+A feature module provider is discovered through the TotemCore entrypoint. Module-owned Screens negotiate through a generic bounded transport and an exact `familyId + protocolVersion` match, so adding a future provider such as `alchemy_cauldron` does not require adding TotemAlchemy knowledge to TotemObserver. The central `ObserverOwnedScreenProtocols` table is frozen as a compatibility surface for pre-generic transports; new module-owned families must use the generic provider transport instead of adding Observer-specific protocol knowledge.
 
 ## Commands and world rules
 
@@ -67,17 +67,17 @@ TotemVanillaTweaks 0.1.28 removes its embedded Observer runtime. TotemObserver r
 
 This prevents both mods from registering the same compatibility packet namespace at once. Use TotemVanillaTweaks 0.1.28 or newer when installing both modules; VanillaTweaks is optional for Observer itself. Install TotemObserver and TotemCore on the server and participating clients.
 
-Nexus protocol 3 and protocol 4 are accepted. The target and observer must advertise the same provider family and protocol; protocol 4 is not converted into protocol 3. Nexus 0.3.21 supplies the detail-aware protocol-4 map provider. Feature modules still own variant validation and the production Screen rendering path.
+Nexus provider protocols 3, 4 and 5 are accepted. Target and observer must advertise the same provider family and exact protocol version; Observer does not translate protocol 5 to 4 or protocol 4 to 3. Nexus 0.3.21 introduced the detail-aware protocol-4 map provider, while Nexus 0.3.23 supplies protocol 5 with session-authorized terrain-backed detail. Feature modules continue to own variant validation and production Screen rendering.
 
 ## Extraction and validation status
 
 Runtime extraction, VanillaTweaks cleanup, Observer GameTests, cross-module integration and dedicated-server/two-client E2E ownership are implemented. The repository's workflows now cover:
 
-- `Build`: unit tests, assembly and extraction invariants.
+- `Build`: unit tests, assembly, extraction invariants and the generic owned-screen boundary.
 - `Observer Runtime Validation`: client GameTests, owner-present integration and built-artifact production runtime validation.
 - `Observer 3-JVM E2E`: a dedicated server plus separate target and observer clients.
 
-The current source version is 0.1.2. Successful validation does not establish a published release; the Modrinth workflow now supports authenticated dry runs and explicit uploads. Any future change from the compatibility packet namespace to `totem-observer:*` remains a separate protocol migration.
+The current source version is 0.1.3. Successful validation does not itself establish a published release; the Modrinth workflow supports authenticated dry runs and explicit uploads. Any future change from the compatibility packet namespace to `totem-observer:*` remains a separate protocol migration.
 
 Current-head CI, local build and independent review evidence are recorded in [VALIDATION.md](VALIDATION.md).
 
@@ -101,10 +101,10 @@ Prepare `.github/staging/modrinth-changelog-<version>.md` and update `gradle.pro
 
 ### Current release
 
-Version **0.1.1** was uploaded and verified on 2026-09-11. The project was submitted to Modrinth moderation and read back as **processing**. See `.github/staging/modrinth-published-0.1.1.json` and `.github/staging/modrinth-review-status-0.1.1.json`.
+Version **0.1.3** was uploaded and verified on 2026-09-12 from release ref `a3fb218e16c3fed61147b2b0ee7139dd68457c2c` by Modrinth publish run `34678109190`. The project was read back as **processing** after upload. See `.github/staging/modrinth-published-0.1.3.json`.
 
 `Submit Modrinth review` is a separate manual workflow. Its default mode only inspects project metadata; submission mode verifies the existing version, fills missing draft metadata from the reviewed project description, and records the fresh moderation state.
 
 ### Nexus map detail compatibility
 
-Observer 0.1.2 supports Nexus provider v5 and session-authorized vanilla terrain packets from TotemNexus 0.3.23. Use Core 0.7.21 or newer with that Nexus version. The owning Nexus Screen renders the detail at its real world position; observation remains read-only and framebuffer-free.
+Observer 0.1.3 supports Nexus provider v5 and session-authorized vanilla terrain packets from TotemNexus 0.3.23. Use Core 0.7.21 or newer with that Nexus version. The owning Nexus Screen renders the detail at its real world position; observation remains read-only and framebuffer-free. Terrain relay failures are fail-closed and now produce bounded server diagnostics instead of silently degrading map detail.
