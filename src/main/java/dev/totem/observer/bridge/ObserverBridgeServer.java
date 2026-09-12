@@ -20,7 +20,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
 
-/** Local transport with optional account sessions. No player, world or Screen access. */
+/** Local transport with optional account sessions. Player identity is reserved, but world admission is not implemented yet. */
 public final class ObserverBridgeServer implements AutoCloseable {
     public static final String PATH = "/observer/bridge";
     public static final String PROTOCOL = "totem-observer-bootstrap-v1";
@@ -29,6 +29,7 @@ public final class ObserverBridgeServer implements AutoCloseable {
     static final AttributeKey<Boolean> READY = AttributeKey.valueOf("observer.bootstrap.ready");
     private static final AttributeKey<Boolean> ACCOUNT = AttributeKey.valueOf("observer.account.protocol");
     private final ObserverAccountService accounts;
+    private final ObserverPlaySessionService playSessions;
     private final EventLoopGroup acceptor = new NioEventLoopGroup(1, new DefaultThreadFactory("observer-bridge-accept", true));
     private final EventLoopGroup workers = new NioEventLoopGroup(1, new DefaultThreadFactory("observer-bridge-io", true));
     private final DefaultChannelGroup channels = new DefaultChannelGroup(workers.next(), true);
@@ -36,8 +37,15 @@ public final class ObserverBridgeServer implements AutoCloseable {
     private Channel listener;
     private boolean closed;
 
-    public ObserverBridgeServer() { this(null); }
-    public ObserverBridgeServer(ObserverAccountService accounts) { this.accounts = accounts; }
+    public ObserverBridgeServer() { this(null, null); }
+    public ObserverBridgeServer(ObserverAccountService accounts) {
+        this(accounts, accounts == null ? null : new ObserverPlaySessionService());
+    }
+    ObserverBridgeServer(ObserverAccountService accounts, ObserverPlaySessionService playSessions) {
+        if ((accounts == null) != (playSessions == null)) throw new IllegalArgumentException("Account/play session services must match");
+        this.accounts = accounts;
+        this.playSessions = playSessions;
+    }
 
     /** Binds IPv4 loopback only until authenticated remote play is implemented. Port 0 is for tests. */
     public synchronized int start(int port, String allowedOrigin) {
@@ -58,7 +66,7 @@ public final class ObserverBridgeServer implements AutoCloseable {
                                     new WebSocketServerProtocolHandler(WebSocketServerProtocolConfig.newBuilder()
                                             .websocketPath(PATH).subprotocols(accounts == null ? PROTOCOL : PROTOCOL + "," + ObserverAuthenticatedExchange.PROTOCOL).checkStartsWith(false)
                                             .maxFramePayloadLength(accounts == null ? MAX_FRAME_BYTES : 1024).allowExtensions(false)
-                                            .handshakeTimeoutMillis(5000).build()), new ObserverAuthenticatedExchange(accounts), new Exchange());
+                                            .handshakeTimeoutMillis(5000).build()), new ObserverAuthenticatedExchange(accounts, playSessions), new Exchange());
                         }
                     }).bind(new InetSocketAddress("127.0.0.1", port)).awaitUninterruptibly();
             if (!binding.isSuccess()) throw new IllegalStateException("Bridge bind failed", binding.cause());
@@ -75,6 +83,7 @@ public final class ObserverBridgeServer implements AutoCloseable {
         closed = true;
         if (listener != null) listener.close().syncUninterruptibly();
         channels.close().awaitUninterruptibly();
+        if (playSessions != null) playSessions.close();
         if (accounts != null) accounts.close();
         var a = acceptor.shutdownGracefully(0, 2, TimeUnit.SECONDS);
         var w = workers.shutdownGracefully(0, 2, TimeUnit.SECONDS);
