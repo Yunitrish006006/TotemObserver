@@ -28,17 +28,21 @@ const hello = {
   'protocol': 1,
   'authentication': true,
   'registration': true,
+  'playerIdentityProtocol': 1,
   'play': false,
 };
 const authenticated = {
   'type': 'authenticated',
   'username': 'alice',
   'expiresInSeconds': 900,
+  'playerUuid': '12345678-1234-1234-1234-123456789abc',
+  'playerName': 'obs_123456781234',
+  'sessionEpoch': 42,
   'play': false,
 };
 
 void main() {
-  testWidgets('login clears password, accepts session and logs out', (
+  testWidgets('login clears password, accepts identity session and logs out', (
     tester,
   ) async {
     final socket = FakeTransport();
@@ -57,12 +61,19 @@ void main() {
     socket.receive({'type': 'pong', 'seq': 0});
     await tester.pump();
     expect(find.text('登入帳號：alice'), findsOneWidget);
+    expect(find.text('玩家身分：obs_123456781234'), findsOneWidget);
+    expect(
+      find.text('角色 UUID：12345678-1234-1234-1234-123456789abc'),
+      findsOneWidget,
+    );
+    expect(connection.sessionEpoch, 42);
     expect(find.text('已收到 1 次連線回應'), findsOneWidget);
     await tester.tap(find.widgetWithText(ElevatedButton, '登出'));
     await tester.pump();
     expect(socket.closed, isTrue);
     expect(socket.sent.last, '{"type":"logout"}');
     expect(connection.account, isEmpty);
+    expect(connection.playerUuid, isEmpty);
     connection.dispose();
   });
 
@@ -108,6 +119,21 @@ void main() {
     second.receive(hello);
     second.receive(authenticated);
     expect(connection.phase, ConnectionPhase.connected);
+    connection.dispose();
+  });
+
+  testWidgets('rejects malformed player identity contract', (tester) async {
+    final socket = FakeTransport();
+    final connection = ObserverConnection(open: (_) => socket);
+    await connection.authenticate(
+      'ws://127.0.0.1:25580/observer/bridge',
+      'alice',
+      'local-test-password',
+    );
+    socket.receive(hello);
+    socket.receive({...authenticated, 'playerUuid': 'client-chosen'});
+    expect(connection.phase, ConnectionPhase.offline);
+    expect(connection.status, '伺服器回應不相容，請重新連線');
     connection.dispose();
   });
 
