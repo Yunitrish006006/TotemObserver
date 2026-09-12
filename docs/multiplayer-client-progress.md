@@ -10,7 +10,7 @@ Totem 全系列是最終相容範圍，包括 Core、Observer、Alchemy、Vanill
 | --- | --- | --- |
 | 1 | Observer 內嵌雙向連線、版本握手、限額與生命週期；固定自動測試 | 已實作，驗證結果見下 |
 | 2 | 自訂帳號、可撤銷連線會話；Flutter 最小連線介面 | 已實作，驗證結果見下；遊戲角色留在步驟 3 |
-| 3 | 固定 26.2 玩家接入與遊戲資料契約；確認瀏覽器核心相容性 | 尚未實作 |
+| 3 | 固定 26.2 玩家接入與遊戲資料契約；確認瀏覽器核心相容性 | 進行中：已開始固定玩家身分與 session epoch 契約；Minecraft 世界接入與瀏覽器核心驗證未完成 |
 | 4 | 區塊/實體/資源/光照同步及網頁 3D 顯示 | 尚未實作 |
 | 5 | 移動、校正、挖放方塊與兩人互動 | 尚未實作 |
 | 6 | 背包、合成、容器、戰鬥、死亡/重生與維度生命週期 | 尚未實作 |
@@ -76,3 +76,16 @@ socket.onmessage = ({data}) => {
 Flutter analyze、5 項 Flutter UI/controller 測試與 release web 建置通過。真實 Chromium 對 release 網頁完成註冊、登入、pong、登出、錯誤密碼與停服撤銷共 6 項檢查。首次視覺檢查發現繁中字型載入延遲，已改用隨網頁提供的 Noto Sans TC；桌面與手機介面已檢查繁中字形。手機版加入 360 像素頁面無水平外溢的固定斷言；Flutter 內部處理捲動，截圖採實際視窗尺寸。證據位於 `build/account-browser-evidence/` 與 `build/account-validation-evidence.json`。
 
 獨立審查要求補上帳號寫入的關閉等待與瀏覽器 heartbeat 回應期限，已修正並通過複查；測試 fixture 與 CI 串接另經只讀審查。沒有變更既有 Observer 正式 Screen、遊戲操作權限或生產世界；尚未提交、推送或發佈。
+
+## 步驟 3 進度（進行中）
+
+第一個切片先固定玩家接入前必須穩定的身分與 session 契約，不提前實作區塊或 3D：
+
+- 每個 Observer 帳號由伺服器導出固定、獨立命名空間的玩家 UUID；瀏覽器不能提交 UUID 或 Minecraft profile name。
+- 伺服器同步導出 16 字元內的固定 `obs_...` profile name，供後續真正 Minecraft 玩家 admission 使用；實際 admission 時仍須檢查既有 Java 玩家名稱碰撞。
+- 每次 authenticated connection 建立新的 session epoch；相同帳號重連維持相同玩家 UUID/profile，但舊 epoch 不能延用。
+- account-v1 回應新增 player identity 資料；目前仍維持 `play:false`，沒有建立 Minecraft 玩家、世界權限或操作能力。
+- Flutter 顯示伺服器核發的玩家身分，並拒絕格式不符的 identity contract。
+- 固定測試覆蓋 deterministic identity、auth session 綁定、重連 identity 穩定/epoch rotation，以及 Flutter malformed identity rejection。
+
+此切片只完成 P0 的身分與 session 前置契約。下一個驗收點仍是：在隔離 Minecraft 26.2 專用伺服器中，以這個已驗證身分建立真正玩家角色，確認重連使用同一玩家存檔，且在成功之前不開始宣稱 world/chunk/play 支援。
