@@ -20,7 +20,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
 
-/** Local transport with optional account sessions. Player identity is reserved, but world admission is not implemented yet. */
+/** Local transport with optional account sessions and dedicated-server player admission. */
 public final class ObserverBridgeServer implements AutoCloseable {
     public static final String PATH = "/observer/bridge";
     public static final String PROTOCOL = "totem-observer-bootstrap-v1";
@@ -30,6 +30,7 @@ public final class ObserverBridgeServer implements AutoCloseable {
     private static final AttributeKey<Boolean> ACCOUNT = AttributeKey.valueOf("observer.account.protocol");
     private final ObserverAccountService accounts;
     private final ObserverPlaySessionService playSessions;
+    private final ObserverPlayerAdmissionService playerAdmissions;
     private final EventLoopGroup acceptor = new NioEventLoopGroup(1, new DefaultThreadFactory("observer-bridge-accept", true));
     private final EventLoopGroup workers = new NioEventLoopGroup(1, new DefaultThreadFactory("observer-bridge-io", true));
     private final DefaultChannelGroup channels = new DefaultChannelGroup(workers.next(), true);
@@ -37,14 +38,20 @@ public final class ObserverBridgeServer implements AutoCloseable {
     private Channel listener;
     private boolean closed;
 
-    public ObserverBridgeServer() { this(null, null); }
+    public ObserverBridgeServer() { this(null, null, null); }
     public ObserverBridgeServer(ObserverAccountService accounts) {
-        this(accounts, accounts == null ? null : new ObserverPlaySessionService());
+        this(accounts, accounts == null ? null : new ObserverPlaySessionService(), null);
     }
     ObserverBridgeServer(ObserverAccountService accounts, ObserverPlaySessionService playSessions) {
+        this(accounts, playSessions, null);
+    }
+    ObserverBridgeServer(ObserverAccountService accounts, ObserverPlaySessionService playSessions,
+                         ObserverPlayerAdmissionService playerAdmissions) {
         if ((accounts == null) != (playSessions == null)) throw new IllegalArgumentException("Account/play session services must match");
+        if (playerAdmissions != null && accounts == null) throw new IllegalArgumentException("Player admission requires account sessions");
         this.accounts = accounts;
         this.playSessions = playSessions;
+        this.playerAdmissions = playerAdmissions;
     }
 
     /** Binds IPv4 loopback only until authenticated remote play is implemented. Port 0 is for tests. */
@@ -66,7 +73,8 @@ public final class ObserverBridgeServer implements AutoCloseable {
                                     new WebSocketServerProtocolHandler(WebSocketServerProtocolConfig.newBuilder()
                                             .websocketPath(PATH).subprotocols(accounts == null ? PROTOCOL : PROTOCOL + "," + ObserverAuthenticatedExchange.PROTOCOL).checkStartsWith(false)
                                             .maxFramePayloadLength(accounts == null ? MAX_FRAME_BYTES : 1024).allowExtensions(false)
-                                            .handshakeTimeoutMillis(5000).build()), new ObserverAuthenticatedExchange(accounts, playSessions), new Exchange());
+                                            .handshakeTimeoutMillis(5000).build()),
+                                    new ObserverAuthenticatedExchange(accounts, playSessions, playerAdmissions), new Exchange());
                         }
                     }).bind(new InetSocketAddress("127.0.0.1", port)).awaitUninterruptibly();
             if (!binding.isSuccess()) throw new IllegalStateException("Bridge bind failed", binding.cause());
@@ -83,6 +91,7 @@ public final class ObserverBridgeServer implements AutoCloseable {
         closed = true;
         if (listener != null) listener.close().syncUninterruptibly();
         channels.close().awaitUninterruptibly();
+        if (playerAdmissions != null) playerAdmissions.close();
         if (playSessions != null) playSessions.close();
         if (accounts != null) accounts.close();
         var a = acceptor.shutdownGracefully(0, 2, TimeUnit.SECONDS);
@@ -97,7 +106,6 @@ public final class ObserverBridgeServer implements AutoCloseable {
         @Override public void channelActive(ChannelHandlerContext ctx) {
             counted = true;
             if (connections.incrementAndGet() > MAX_CONNECTIONS) { ctx.close(); return; }
-            // Absolute deadline also closes clients that trickle an incomplete HTTP request.
             deadline = ctx.executor().schedule(() -> {
                 if (!Boolean.TRUE.equals(ctx.channel().attr(READY).get())) ctx.close();
             }, 5, TimeUnit.SECONDS);
@@ -154,7 +162,6 @@ public final class ObserverBridgeServer implements AutoCloseable {
     }
 
     private static final class Exchange extends SimpleChannelInboundHandler<WebSocketFrame> {
-        // Canonical, bounded JSON avoids a general-purpose parser on this bootstrap endpoint.
         private static final Pattern PING = Pattern.compile("\\{\"type\":\"ping\",\"seq\":(0|[1-9][0-9]{0,8})}");
         private long sequence = -1;
         @Override public void userEventTriggered(ChannelHandlerContext ctx, Object event) {
@@ -179,7 +186,6 @@ public final class ObserverBridgeServer implements AutoCloseable {
                     .addListener(ChannelFutureListener.CLOSE);
         }
         @Override public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
-            // Never log request bodies, URI query strings or untrusted input.
             ctx.close();
         }
     }
