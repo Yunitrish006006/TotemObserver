@@ -10,7 +10,7 @@ Totem 全系列是最終相容範圍，包括 Core、Observer、Alchemy、Vanill
 | --- | --- | --- |
 | 1 | Observer 內嵌雙向連線、版本握手、限額與生命週期；固定自動測試 | 已實作，驗證結果見下 |
 | 2 | 自訂帳號、可撤銷連線會話；Flutter 最小連線介面 | 已實作，驗證結果見下；遊戲角色留在步驟 3 |
-| 3 | 固定 26.2 玩家接入與遊戲資料契約；確認瀏覽器核心相容性 | 進行中：已開始固定玩家身分與 session epoch 契約；Minecraft 世界接入與瀏覽器核心驗證未完成 |
+| 3 | 固定 26.2 玩家接入與遊戲資料契約；確認瀏覽器核心相容性 | 進行中：固定玩家身分、session epoch 與 26.2 `ServerPlayer` admission/playerdata lifecycle 已實作；world sync / gameplay core 相容性未完成 |
 | 4 | 區塊/實體/資源/光照同步及網頁 3D 顯示 | 尚未實作 |
 | 5 | 移動、校正、挖放方塊與兩人互動 | 尚未實作 |
 | 6 | 背包、合成、容器、戰鬥、死亡/重生與維度生命週期 | 尚未實作 |
@@ -61,9 +61,9 @@ socket.onmessage = ({data}) => {
 
 `ObserverBridgeServerTest` 使用真實本機 TCP/WebSocket：握手、hello/pong、錯誤 origin/協定、重複序號、非法遊戲操作、超大/二進位/分片訊息、關閉及重新綁定、占用連接埠、非法數字、連線數、握手與 idle 逾時。控制 frame 限額使用 Netty EmbeddedChannel 邊界測試。
 
-`ObserverBridgeGameTest` 在專用 Minecraft runtime 中以背景網路工作完成真實 hello/pong，不在 tick 上等待網路，也不需要客戶端 Screen。這驗證 runtime 類別相容與交換；不代表公網、TLS、Flutter 渲染或帳號功能通過。
+`ObserverBridgeGameTest` 在專用 Minecraft runtime 中以背景網路工作完成真實 hello/pong，不在 tick 上等待網路，也不需要客戶端 Screen。這驗證 runtime 類別相容與交換；不代表公網、TLS、Flutter 渲染或完整遊戲功能通過。
 
-既有 `Build` workflow 的 `test` 與 `runGameTest` 自動執行新測試，不另建立重複 workflow。原有 Observer Screen 與 owner API 未更動；完整客戶端/3-JVM 回歸仍由既有 owning workflows 負責。本次未推送或發佈，不能宣稱遠端 CI 已驗證本機改動。
+既有 `Build` workflow 的 `test` 與 `runGameTest` 自動執行新測試，不另建立重複 workflow。原有 Observer Screen 與 owner API 未更動；完整客戶端/3-JVM 回歸仍由既有 owning workflows 負責。
 
 2026-09-11 本機結果：Java 25、Core 0.7.18；24 項單元測試通過，其中 11 項為 bridge 測試；專用 Minecraft 26.2 runtime 的 7 項 GameTests 全數通過，包含新增 bridge hello/pong。獨立審查與修正後複查通過；bind 失敗清理與非法 JSON 序號已修正並有回歸測試。
 
@@ -75,17 +75,20 @@ socket.onmessage = ({data}) => {
 
 Flutter analyze、5 項 Flutter UI/controller 測試與 release web 建置通過。真實 Chromium 對 release 網頁完成註冊、登入、pong、登出、錯誤密碼與停服撤銷共 6 項檢查。首次視覺檢查發現繁中字型載入延遲，已改用隨網頁提供的 Noto Sans TC；桌面與手機介面已檢查繁中字形。手機版加入 360 像素頁面無水平外溢的固定斷言；Flutter 內部處理捲動，截圖採實際視窗尺寸。證據位於 `build/account-browser-evidence/` 與 `build/account-validation-evidence.json`。
 
-獨立審查要求補上帳號寫入的關閉等待與瀏覽器 heartbeat 回應期限，已修正並通過複查；測試 fixture 與 CI 串接另經只讀審查。沒有變更既有 Observer 正式 Screen、遊戲操作權限或生產世界；尚未提交、推送或發佈。
+獨立審查要求補上帳號寫入的關閉等待與瀏覽器 heartbeat 回應期限，已修正並通過複查；測試 fixture 與 CI 串接另經只讀審查。沒有變更既有 Observer 正式 Screen、遊戲操作權限或生產世界。
 
 ## 步驟 3 進度（進行中）
 
-第一個切片先固定玩家接入前必須穩定的身分與 session 契約，不提前實作區塊或 3D：
+目前已把「帳號 → 固定伺服器身分 → authenticated play-session boundary → 真正 Minecraft 玩家生命週期」接通，但尚未開始區塊/3D/遊戲操作：
 
-- 每個 Observer 帳號由伺服器導出固定、獨立命名空間的玩家 UUID；瀏覽器不能提交 UUID 或 Minecraft profile name。
-- 伺服器同步導出 16 字元內的固定 `obs_...` profile name，供後續真正 Minecraft 玩家 admission 使用；實際 admission 時仍須檢查既有 Java 玩家名稱碰撞。
-- 每次 authenticated connection 建立新的 session epoch；相同帳號重連維持相同玩家 UUID/profile，但舊 epoch 不能延用。
-- account-v1 回應新增 player identity 資料；目前仍維持 `play:false`，沒有建立 Minecraft 玩家、世界權限或操作能力。
-- Flutter 顯示伺服器核發的玩家身分，並拒絕格式不符的 identity contract。
-- 固定測試覆蓋 deterministic identity、auth session 綁定、重連 identity 穩定/epoch rotation，以及 Flutter malformed identity rejection。
+- 每個 Observer 帳號由伺服器導出固定、獨立命名空間的玩家 UUID 與 16 字元內 `obs_...` profile name；瀏覽器不能提交或覆寫 UUID、profile name 或 OP 狀態。
+- 每次 authenticated connection 建立新的 session epoch；相同帳號重連維持同一玩家 UUID/profile，但舊 epoch 與舊 admission 不能延用。
+- account-v1 hello 以 additive 欄位宣告 `playerIdentityProtocol` 與 `playerAdmission`。真正 `ServerPlayer` admission 完成後 authenticated 回應 `playerAttached:true`；舊版 identity-only fixture 仍可使用 `playerAdmission:false`。
+- dedicated server 以 `ServerPlayer`、`PlayerList.placeNewPlayer` 與 `PlayerList.remove` 管理玩家生命週期，載入/保存原版 playerdata。replacement 會保存舊玩家並以相同固定 UUID/profile 重載；舊 socket 的延遲 release 不能移除 replacement。
+- admission 前仍走原版 `PlayerList.canPlayerLogin`，因此 production 端保留 ban、whitelist、IP ban 與容量政策；bridge 本身只監聽 loopback，policy 檢查使用 loopback transport address，不降低 Java 玩家 online-mode 驗證。
+- 目前虛擬 Minecraft connection 只為 vanilla `ServerGamePacketListenerImpl` 提供生命週期並在伺服器內部回答 keepalive。world/clientbound gameplay packets 仍丟棄，不接受移動、挖放方塊、背包等玩家輸入。
+- Flutter 顯示伺服器核發的玩家身分、UUID 與「已接入 Minecraft」狀態；若伺服器宣告 `playerAdmission:true` 卻沒有 `playerAttached:true`，客戶端視為不相容。`play` 仍固定為 `false`。
+- Server GameTest 覆蓋真正 PlayerList admission、相同帳號 replacement、vanilla playerdata 保存/重載，以及 stale release 不移除 replacement。GameTest runtime 本身把最大玩家數固定得很低，因此只在 gametest test mod 以專用 mixin 放寬 `GameTestServer#getMaxPlayers()`；production mixin 與 admission policy 不受影響。
+- Build 固定驗證另涵蓋 Java 單元測試、Flutter analyze/test/release web、真實 Chromium 註冊/登入/pong/登出/錯誤密碼/停服撤銷，以及 extraction invariants。admission 失敗會在伺服器端記錄 account 與 exception，但不記錄密碼、token 或 protocol payload。
 
-此切片只完成 P0 的身分與 session 前置契約。下一個驗收點仍是：在隔離 Minecraft 26.2 專用伺服器中，以這個已驗證身分建立真正玩家角色，確認重連使用同一玩家存檔，且在成功之前不開始宣稱 world/chunk/play 支援。
+此階段仍不宣稱步驟 3 完成。下一個驗收點是讓另一個正常 Java 客戶端在 26.2 世界中觀察到已接入的 Observer 玩家，並完成瀏覽器 gameplay core / world-sync 路線的相容性判定；在這些驗收通過前不開始宣稱區塊、3D 或可遊玩支援，也不把 `play` 改為 `true`。
