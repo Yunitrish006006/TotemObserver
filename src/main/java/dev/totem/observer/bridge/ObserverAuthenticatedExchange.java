@@ -11,20 +11,24 @@ import java.util.*;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 
-/** Account-v1 connection state machine; identity reservation still grants no gameplay authority. */
+/** Account-v1 connection state machine; world streaming and browser gameplay remain disabled. */
 final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<WebSocketFrame> {
     static final String PROTOCOL = "totem-observer-account-v1";
     private final ObserverAccountService accounts;
     private final ObserverPlaySessionService playSessions;
+    private final ObserverPlayerAdmissionService playerAdmissions;
     private ObserverAccountService.Session session;
     private ObserverPlaySessionService.Session playSession;
+    private ObserverPlayerAdmissionService.Admission playerAdmission;
     private boolean selected, pending, ended;
     private long sequence = -1;
     private io.netty.util.concurrent.ScheduledFuture<?> deadline;
 
-    ObserverAuthenticatedExchange(ObserverAccountService accounts, ObserverPlaySessionService playSessions) {
+    ObserverAuthenticatedExchange(ObserverAccountService accounts, ObserverPlaySessionService playSessions,
+                                  ObserverPlayerAdmissionService playerAdmissions) {
         this.accounts = accounts;
         this.playSessions = playSessions;
+        this.playerAdmissions = playerAdmissions;
     }
 
     @Override public void userEventTriggered(ChannelHandlerContext ctx, Object event) {
@@ -32,7 +36,8 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
             selected = true;
             ctx.channel().attr(ObserverBridgeServer.READY).set(true);
             send(ctx, "{\"type\":\"hello\",\"protocol\":1,\"authentication\":true,\"registration\":" + accounts.registrationAllowed()
-                    + ",\"playerIdentityProtocol\":" + ObserverPlaySessionService.PROTOCOL + ",\"play\":false}");
+                    + ",\"playerIdentityProtocol\":" + ObserverPlaySessionService.PROTOCOL
+                    + ",\"playerAdmission\":" + (playerAdmissions != null) + ",\"play\":false}");
             deadline = ctx.executor().schedule(() -> stop(ctx, "Login timed out"), 10, TimeUnit.SECONDS);
         } else if (selected && event instanceof IdleStateEvent) stop(ctx, "Connection idle");
         else ctx.fireUserEventTriggered(event);
@@ -61,7 +66,10 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
                 if (!submitted) failLogin(ctx);
                 return;
             }
-            if (!accounts.valid(session) || !playSessions.valid(session, playSession)) { stop(ctx, "Session revoked"); return; }
+            if (!accounts.valid(session) || !playSessions.valid(session, playSession)
+                    || (playerAdmissions != null && !playerAdmissions.valid(playSession, playerAdmission))) {
+                stop(ctx, "Session revoked"); return;
+            }
             if ("logout".equals(type) && message.size() == 1) {
                 send(ctx, "{\"type\":\"logged_out\"}"); stop(ctx, "Logged out"); return;
             }
@@ -84,14 +92,49 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
         if (session == null) { stop(ctx, "Service stopped"); return; }
         playSession = playSessions.open(session);
         if (playSession == null) { stop(ctx, "Service stopped"); return; }
+
+        if (playerAdmissions == null) {
+            finishAuthenticated(ctx, name, false);
+            return;
+        }
+
+        pending = true;
+        playerAdmissions.open(playSession).whenComplete((admission, failure) -> {
+            try {
+                ctx.executor().execute(() -> finishAdmission(ctx, name, admission, failure));
+            } catch (RejectedExecutionException ignored) {
+                if (admission != null) playerAdmissions.release(admission);
+            }
+        });
+    }
+
+    private void finishAdmission(ChannelHandlerContext ctx, String name,
+                                 ObserverPlayerAdmissionService.Admission admission, Throwable failure) {
+        pending = false;
+        if (ended || !ctx.channel().isActive()) {
+            if (admission != null) playerAdmissions.release(admission);
+            return;
+        }
+        if (failure != null || admission == null || !playerAdmissions.valid(playSession, admission)) {
+            if (admission != null) playerAdmissions.release(admission);
+            stop(ctx, "Player admission failed");
+            return;
+        }
+        playerAdmission = admission;
+        finishAuthenticated(ctx, name, true);
+    }
+
+    private void finishAuthenticated(ChannelHandlerContext ctx, String name, boolean attached) {
         if (deadline != null) deadline.cancel(false);
         deadline = ctx.executor().schedule(() -> stop(ctx, "Session expired"), 15, TimeUnit.MINUTES);
         var identity = playSession.identity();
         send(ctx, "{\"type\":\"authenticated\",\"username\":\"" + name
                 + "\",\"expiresInSeconds\":900,\"playerUuid\":\"" + identity.uuid()
                 + "\",\"playerName\":\"" + identity.profileName()
-                + "\",\"sessionEpoch\":" + playSession.epoch() + ",\"play\":false}");
+                + "\",\"sessionEpoch\":" + playSession.epoch()
+                + ",\"playerAttached\":" + attached + ",\"play\":false}");
     }
+
     private void failLogin(ChannelHandlerContext ctx) {
         send(ctx, "{\"type\":\"auth_failed\"}"); stop(ctx, "Authentication failed");
     }
@@ -104,6 +147,7 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
     }
     private void release() {
         if (deadline != null) deadline.cancel(false);
+        if (playerAdmission != null) { playerAdmissions.release(playerAdmission); playerAdmission = null; }
         if (playSession != null) { playSessions.release(playSession); playSession = null; }
         if (session != null) { accounts.release(session); session = null; }
     }
