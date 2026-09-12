@@ -78,7 +78,9 @@ jobs:
         working-directory: client_flutter
         run: |
           flutter pub get --enforce-lockfile
-          dart format --output=none --set-exit-if-changed lib test
+          dart format lib test
+          git diff -- test/connection_test.dart
+          git diff --quiet -- lib test
           flutter analyze
           flutter test
           flutter build web --release --no-web-resources-cdn
