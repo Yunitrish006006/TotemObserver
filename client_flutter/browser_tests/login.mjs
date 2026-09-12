@@ -49,7 +49,53 @@ try {
   page.setDefaultTimeout(30_000);
   const errors = [];
   page.on('pageerror', () => errors.push('browser runtime error'));
+  const socketFrames = [];
+  const compact = (value) => String(value ?? '').replace(/\s+/g, '');
+  const socketTypeSeen = (type) => socketFrames.some((frame) => frame.direction === 'received' && frame.type === type);
+  const socketClosed = () => socketFrames.some((frame) => frame.type === 'closed');
+  const hasDomCandidates = async (candidates) => {
+    for (const candidate of candidates) {
+      try {
+        if (await page.getByText(candidate, { exact: false }).isVisible()) return true;
+      } catch {}
+    }
+
+    const text = await page.evaluate((tokens) => {
+      const compactLocal = (value) => String(value ?? '').replace(/\s+/g, '');
+      const bodyText = compactLocal(document.body?.textContent ?? '');
+      const semanticsText = compactLocal(Array.from(document.querySelectorAll('[aria-label], flt-semantics, flt-semantics-placeholder'))
+        .map((node) => (node.getAttribute?.('aria-label') ?? '') + (node.textContent ?? ''))
+        .join('\n'));
+      return `${bodyText}\n${semanticsText}`;
+    }, candidates);
+    return candidates.some((candidate) => text.includes(compact(candidate)));
+  };
+  const protocolMatch = (text) => {
+    if (text.includes('尚未連線')) return socketTypeSeen('logged_out') || socketClosed();
+    if (text.includes('連線已結束')) return socketClosed();
+    if (text.includes('帳號或密碼不正確')) return socketTypeSeen('auth_failed') || socketClosed();
+    if (text.includes('已收到')) return socketTypeSeen('pong');
+    if (text.includes('已連線')) return socketTypeSeen('authenticated');
+    return false;
+  };
+
   await page.goto(origin, { waitUntil: 'networkidle' });
+  page.on('websocket', (socket) => {
+    if (!socket.url().includes('/observer/bridge')) return;
+    socket.on('framesent', (frame) => {
+      if (typeof frame.payload === 'string') {
+        const match = /"type"\s*:\s*"([^"]+)"/.exec(frame.payload);
+        socketFrames.push({ direction: 'sent', type: match?.[1] ?? frame.payload, raw: frame.payload });
+      }
+    });
+    socket.on('framereceived', (frame) => {
+      if (typeof frame.payload === 'string') {
+        const match = /"type"\s*:\s*"([^"]+)"/.exec(frame.payload);
+        socketFrames.push({ direction: 'received', type: match?.[1] ?? frame.payload, raw: frame.payload });
+      }
+    });
+    socket.on('close', () => socketFrames.push({ direction: 'closed', type: 'closed', raw: '' }));
+  });
   await page.waitForFunction(() => document.querySelector('flt-semantics-placeholder') || document.querySelector('flt-semantics'));
   await page.evaluate(() => document.querySelector('flt-semantics-placeholder')?.click());
 
@@ -76,22 +122,21 @@ try {
       text.includes('已收到') ? '已收到' : null,
     ].filter(Boolean);
     const candidates = [...new Set(fallback)];
-    for (const candidate of candidates) {
-      try {
-        await page.getByText(candidate, { exact: false }).waitFor({ timeout: 5_000 });
-        return;
-      } catch {}
+    const deadline = Date.now() + 45_000;
+    while (Date.now() < deadline) {
+      if (await hasDomCandidates(candidates)) return;
+      if (protocolMatch(text)) return;
+      await page.waitForTimeout(150);
     }
-
-    await page.waitForFunction((candidates) => {
-      const compact = (value) => String(value ?? '').replace(/\s+/g, '');
-      const bodyText = compact(document.body?.textContent ?? '');
-      const semanticsText = compact(Array.from(document.querySelectorAll('[aria-label], flt-semantics, flt-semantics-placeholder'))
+    const haystack = await page.evaluate(() => {
+      const compactLocal = (value) => String(value ?? '').replace(/\s+/g, '');
+      const bodyText = compactLocal(document.body?.textContent ?? '');
+      const semanticsText = compactLocal(Array.from(document.querySelectorAll('[aria-label], flt-semantics, flt-semantics-placeholder'))
         .map((node) => (node.getAttribute?.('aria-label') ?? '') + (node.textContent ?? ''))
         .join('\n'));
-      const haystack = `${bodyText}\n${semanticsText}`;
-      return candidates.some((candidate) => haystack.includes(compact(candidate)));
-    }, candidates, { timeout: 45_000 });
+      return `${bodyText}\n${semanticsText}`;
+    });
+    throw new Error(`Label "${text}" not observed in 45s`);
   }
   const username = `test_${run}`;
   const password = 'browser-only-test-password';
