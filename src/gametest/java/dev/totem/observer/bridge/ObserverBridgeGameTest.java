@@ -27,15 +27,16 @@ public final class ObserverBridgeGameTest {
     public void admittedPlayerReplacementSavesAndReloadsVanillaPlayerData(GameTestHelper helper) {
         var server = helper.getLevel().getServer();
         String account = "gt_" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
-        try (var playSessions = new ObserverPlaySessionService();
-             var admissions = new ObserverPlayerAdmissionService(server)) {
-            var authA = new ObserverAccountService.Session(account, UUID.randomUUID());
-            var playA = playSessions.open(authA);
-            var first = admissions.open(playA).join();
-            if (first == null) helper.fail("Observer player admission returned null");
+        var playSessions = new ObserverPlaySessionService();
+        var admissions = new ObserverPlayerAdmissionService(server);
+        var authA = new ObserverAccountService.Session(account, UUID.randomUUID());
+        var playA = playSessions.open(authA);
+
+        var result = admissions.open(playA).thenCompose(first -> {
+            if (first == null) throw new AssertionError("Observer player admission returned null");
             var playerA = first.player();
             if (server.getPlayerList().getPlayer(playerA.getUUID()) != playerA) {
-                helper.fail("Admitted Observer player is not in PlayerList");
+                throw new AssertionError("Admitted Observer player is not in PlayerList");
             }
 
             playerA.getInventory().setItem(0, new ItemStack(Items.DIAMOND, 7));
@@ -46,38 +47,47 @@ public final class ObserverBridgeGameTest {
             // Re-authentication replaces the active identity without explicitly releasing the old admission first.
             var authB = new ObserverAccountService.Session(account, UUID.randomUUID());
             var playB = playSessions.open(authB);
-            var second = admissions.open(playB).join();
-            if (second == null || second.player() == playerA
-                    || !second.player().getUUID().equals(expectedId)
-                    || !second.player().getGameProfile().name().equals(expectedName)) {
-                helper.fail("Observer replacement did not restore the same server-owned identity");
-            }
-            if (server.getPlayerList().getPlayer(expectedId) != second.player()) {
-                helper.fail("Replacement Observer player is not the sole PlayerList entry for its UUID");
-            }
-            if (admissions.valid(playA, first)) {
-                helper.fail("Replaced Observer admission remained valid");
-            }
-            if (!second.player().getInventory().getItem(0).is(Items.DIAMOND)
-                    || second.player().getInventory().getItem(0).getCount() != 7
-                    || second.player().getHealth() != 13.0F) {
-                helper.fail("Observer replacement did not reload vanilla playerdata");
-            }
+            return admissions.open(playB).thenAccept(second -> {
+                if (second == null || second.player() == playerA
+                        || !second.player().getUUID().equals(expectedId)
+                        || !second.player().getGameProfile().name().equals(expectedName)) {
+                    throw new AssertionError("Observer replacement did not restore the same server-owned identity");
+                }
+                if (server.getPlayerList().getPlayer(expectedId) != second.player()) {
+                    throw new AssertionError("Replacement Observer player is not the sole PlayerList entry for its UUID");
+                }
+                if (admissions.valid(playA, first)) {
+                    throw new AssertionError("Replaced Observer admission remained valid");
+                }
+                if (!second.player().getInventory().getItem(0).is(Items.DIAMOND)
+                        || second.player().getInventory().getItem(0).getCount() != 7
+                        || second.player().getHealth() != 13.0F) {
+                    throw new AssertionError("Observer replacement did not reload vanilla playerdata");
+                }
 
-            // A delayed cleanup from the old socket must not remove the replacement player.
-            admissions.release(first);
-            if (server.getPlayerList().getPlayer(expectedId) != second.player()
-                    || !admissions.valid(playB, second)) {
-                helper.fail("Stale Observer release removed the replacement player");
-            }
+                // A delayed cleanup from the old socket must not remove the replacement player.
+                admissions.release(first);
+                if (server.getPlayerList().getPlayer(expectedId) != second.player()
+                        || !admissions.valid(playB, second)) {
+                    throw new AssertionError("Stale Observer release removed the replacement player");
+                }
 
-            admissions.release(second);
-            playSessions.release(playB);
-            if (server.getPlayerList().getPlayer(expectedId) != null) {
-                helper.fail("Released Observer player remained in PlayerList");
-            }
-        }
-        helper.succeed();
+                admissions.release(second);
+                playSessions.release(playB);
+                if (server.getPlayerList().getPlayer(expectedId) != null) {
+                    throw new AssertionError("Released Observer player remained in PlayerList");
+                }
+            });
+        });
+        result.whenComplete((ignored, failure) -> {
+            admissions.close();
+            playSessions.close();
+        });
+
+        helper.startSequence().thenWaitUntil(() -> {
+            if (!result.isDone()) helper.fail("Waiting for asynchronous Observer spawn preparation");
+            result.join();
+        }).thenSucceed();
     }
 
     private void exchange(GameTestHelper helper, boolean authenticated) {

@@ -16,11 +16,12 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ClientInformation;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.network.CommonListenerCookie;
-import net.minecraft.util.ProblemReporter;
-import net.minecraft.world.level.storage.TagValueInput;
+import net.minecraft.server.network.config.PrepareSpawnTask;
+import net.minecraft.server.players.NameAndId;
 
 import java.net.InetSocketAddress;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
@@ -46,28 +47,30 @@ public final class ObserverPlayerAdmissionService implements AutoCloseable {
     }
 
     private record Active(Admission admission, ObserverClientConnection connection) {}
+    private record Pending(ObserverPlaySessionService.Session playSession,
+                           CompletableFuture<Admission> result,
+                           PrepareSpawnTask spawnTask,
+                           ObserverClientConnection connection,
+                           CommonListenerCookie cookie) {}
 
     private final MinecraftServer server;
     private final Map<String, Active> active = new ConcurrentHashMap<>();
+    /** Server-thread only; pending spawn preparation is advanced once per Minecraft tick. */
+    private final Map<String, Pending> pending = new HashMap<>();
     private volatile boolean closed;
 
     public ObserverPlayerAdmissionService(MinecraftServer server) {
         this.server = Objects.requireNonNull(server, "server");
+        // PrepareSpawnTask deliberately spans ticks while spawn chunks are located/loaded. MinecraftServer
+        // has no tickable removal API, so a closed service leaves only this constant-time no-op callback.
+        execute(() -> server.addTickable(this::tickPendingAdmissions));
     }
 
-    /** Completes only after PlayerList admission has run on the Minecraft server thread. */
+    /** Completes only after vanilla spawn preparation and PlayerList admission have run on the server thread. */
     public CompletableFuture<Admission> open(ObserverPlaySessionService.Session playSession) {
         Objects.requireNonNull(playSession, "playSession");
         var result = new CompletableFuture<Admission>();
-        execute(() -> {
-            try {
-                if (closed) { result.complete(null); return; }
-                result.complete(openNow(playSession));
-            } catch (Throwable failure) {
-                TotemObserver.LOGGER.warn("Observer player admission failed for account {}", playSession.account(), failure);
-                result.completeExceptionally(failure);
-            }
-        });
+        execute(() -> beginOpen(playSession, result));
         return result;
     }
 
@@ -87,49 +90,109 @@ public final class ObserverPlayerAdmissionService implements AutoCloseable {
         });
     }
 
-    private Admission openNow(ObserverPlaySessionService.Session playSession) {
-        var identity = playSession.identity();
-        var playerList = server.getPlayerList();
-
-        var previous = active.get(playSession.account());
-        if (previous != null) removeNow(previous);
-
-        if (playerList.getPlayer(identity.uuid()) != null || playerList.getPlayerByName(identity.profileName()) != null) {
-            throw new IllegalStateException("Observer player identity is already present");
+    private void beginOpen(ObserverPlaySessionService.Session playSession, CompletableFuture<Admission> result) {
+        if (closed) {
+            result.complete(null);
+            return;
         }
+        try {
+            String account = playSession.account();
+            var previousPending = pending.get(account);
+            if (previousPending != null) cancelPending(previousPending);
 
-        var profile = new GameProfile(identity.uuid(), identity.profileName());
-        var player = new ServerPlayer(server, server.overworld(), profile, ClientInformation.createDefault());
-        // Reuse vanilla ban/whitelist/capacity policy. The bridge is loopback-only, so its transport address is loopback.
-        var rejection = playerList.canPlayerLogin(BRIDGE_ADDRESS, player.nameAndId());
-        if (rejection != null) {
-            throw new IllegalStateException("Observer player rejected by server admission policy: " + rejection.getString());
-        }
+            var previous = active.get(account);
+            if (previous != null) removeNow(previous);
 
-        var connection = new ObserverClientConnection(server);
-        boolean placed = false;
-        try (var problems = new ProblemReporter.ScopedCollector(player.problemPath(), TotemObserver.LOGGER)) {
-            var loaded = playerList.loadPlayerData(player.nameAndId())
-                    .map(tag -> TagValueInput.create(problems, player.registryAccess(), tag));
-            loaded.ifPresent(player::load);
+            var identity = playSession.identity();
+            var playerList = server.getPlayerList();
+            if (playerList.getPlayer(identity.uuid()) != null || playerList.getPlayerByName(identity.profileName()) != null) {
+                throw new IllegalStateException("Observer player identity is already present");
+            }
 
-            playerList.placeNewPlayer(connection, player,
-                    new CommonListenerCookie(profile, 0, player.clientInformation(), false));
-            placed = true;
-            loaded.ifPresent(input -> {
-                player.loadAndSpawnEnderPearls(input);
-                player.loadAndSpawnParentVehicle(input);
-            });
-            // Re-apply loaded coordinates to the server game listener/chunk tracker after PlayerList setup.
-            player.connection.teleport(player.getX(), player.getY(), player.getZ(), player.getYRot(), player.getXRot());
-            var admission = new Admission(playSession, player);
-            active.put(playSession.account(), new Active(admission, connection));
-            return admission;
+            var nameAndId = new NameAndId(identity.uuid(), identity.profileName());
+            // Reuse vanilla ban/whitelist/capacity policy. The bridge is loopback-only, so its transport address is loopback.
+            var rejection = playerList.canPlayerLogin(BRIDGE_ADDRESS, nameAndId);
+            if (rejection != null) {
+                throw new IllegalStateException("Observer player rejected by server admission policy: " + rejection.getString());
+            }
+
+            var profile = new GameProfile(identity.uuid(), identity.profileName());
+            var clientInformation = ClientInformation.createDefault();
+            var connection = new ObserverClientConnection(server);
+            var cookie = new CommonListenerCookie(profile, 0, clientInformation, false);
+            var spawnTask = new PrepareSpawnTask(server, nameAndId);
+            var value = new Pending(playSession, result, spawnTask, connection, cookie);
+            pending.put(account, value);
+            try {
+                // PrepareSpawnTask currently emits no configuration packet from start; if that changes,
+                // this embedded admission still has no Minecraft client to consume configuration traffic.
+                spawnTask.start(packet -> { });
+            } catch (Throwable failure) {
+                failPending(value, failure);
+            }
         } catch (Throwable failure) {
-            if (placed && playerList.getPlayer(player.getUUID()) == player) playerList.remove(player);
-            connection.closeEmbeddedChannel();
-            throw failure;
+            TotemObserver.LOGGER.warn("Observer player admission failed for account {}", playSession.account(), failure);
+            result.completeExceptionally(failure);
         }
+    }
+
+    /** Advances vanilla PlayerSpawnFinder/chunk preparation without blocking the Minecraft server thread. */
+    private void tickPendingAdmissions() {
+        if (closed || pending.isEmpty()) return;
+        for (var value : new ArrayList<>(pending.values())) {
+            String account = value.playSession().account();
+            if (pending.get(account) != value) continue;
+            if (value.result().isCancelled()) {
+                cancelPending(value);
+                continue;
+            }
+            try {
+                if (!value.spawnTask().tick()) continue;
+                ServerPlayer player = value.spawnTask().spawnPlayer(value.connection(), value.cookie());
+                value.spawnTask().close();
+                if (!pending.remove(account, value)) {
+                    if (server.getPlayerList().getPlayer(player.getUUID()) == player) server.getPlayerList().remove(player);
+                    value.connection().closeEmbeddedChannel();
+                    continue;
+                }
+                var admission = new Admission(value.playSession(), player);
+                active.put(account, new Active(admission, value.connection()));
+                value.result().complete(admission);
+            } catch (Throwable failure) {
+                cleanupFailedPlacement(value);
+                failPending(value, failure);
+            }
+        }
+    }
+
+    private void cleanupFailedPlacement(Pending value) {
+        var identity = value.playSession().identity();
+        var player = server.getPlayerList().getPlayer(identity.uuid());
+        if (player != null && identity.profileName().equals(player.getGameProfile().name())
+                && active.get(value.playSession().account()) == null) {
+            server.getPlayerList().remove(player);
+        }
+    }
+
+    private void failPending(Pending value, Throwable failure) {
+        if (!pending.remove(value.playSession().account(), value)) return;
+        try {
+            value.spawnTask().close();
+        } finally {
+            value.connection().closeEmbeddedChannel();
+        }
+        TotemObserver.LOGGER.warn("Observer player admission failed for account {}", value.playSession().account(), failure);
+        value.result().completeExceptionally(failure);
+    }
+
+    private void cancelPending(Pending value) {
+        if (!pending.remove(value.playSession().account(), value)) return;
+        try {
+            value.spawnTask().close();
+        } finally {
+            value.connection().closeEmbeddedChannel();
+        }
+        value.result().complete(null);
     }
 
     private void removeNow(Active value) {
@@ -148,6 +211,8 @@ public final class ObserverPlayerAdmissionService implements AutoCloseable {
         if (closed) return;
         closed = true;
         execute(() -> {
+            for (var value : new ArrayList<>(pending.values())) cancelPending(value);
+            pending.clear();
             for (var value : new ArrayList<>(active.values())) removeNow(value);
             active.clear();
         });
