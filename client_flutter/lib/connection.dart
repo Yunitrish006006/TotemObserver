@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
@@ -389,7 +390,8 @@ class ObserverConnection extends ChangeNotifier {
             if (offset != 0) throw const FormatException();
             registryFingerprint = fingerprint;
             registryTotal = total;
-          } else if (fingerprint != registryFingerprint || total != registryTotal) {
+          } else if (fingerprint != registryFingerprint ||
+              total != registryTotal) {
             throw const FormatException();
           }
           _pendingWorldRegistrySequence = -1;
