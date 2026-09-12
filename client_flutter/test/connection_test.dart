@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:totem_observer_client/connection.dart';
@@ -30,6 +31,7 @@ const hello = {
   'registration': true,
   'playerIdentityProtocol': 1,
   'playerAdmission': true,
+  'worldStateProtocol': 1,
   'play': false,
 };
 const authenticated = {
@@ -42,9 +44,21 @@ const authenticated = {
   'playerAttached': true,
   'play': false,
 };
+const worldState = {
+  'type': 'world_state',
+  'protocol': 1,
+  'seq': 0,
+  'sessionEpoch': 42,
+  'dimension': 'minecraft:overworld',
+  'x': 12.25,
+  'y': 64.0,
+  'z': -3.5,
+  'yaw': 90.0,
+  'pitch': -15.0,
+};
 
 void main() {
-  testWidgets('login clears password, accepts admitted player and logs out', (
+  testWidgets('login clears password, reads world snapshot and logs out', (
     tester,
   ) async {
     final socket = FakeTransport();
@@ -60,7 +74,10 @@ void main() {
     socket.receive(hello);
     expect(jsonDecode(socket.sent.single)['password'], 'local-test-password');
     socket.receive(authenticated);
-    socket.receive({'type': 'pong', 'seq': 0});
+    expect(jsonDecode(socket.sent[1]), {'type': 'world_state', 'seq': 0});
+    expect(jsonDecode(socket.sent[2]), {'type': 'ping', 'seq': 1});
+    socket.receive(worldState);
+    socket.receive({'type': 'pong', 'seq': 1});
     await tester.pump();
     expect(find.text('登入帳號：alice'), findsOneWidget);
     expect(find.text('玩家身分：obs_123456781234'), findsOneWidget);
@@ -69,9 +86,14 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('角色狀態：已接入 Minecraft 玩家清單'), findsOneWidget);
+    expect(find.text('世界維度：minecraft:overworld'), findsOneWidget);
+    expect(find.text('角色位置：12.25, 64.00, -3.50'), findsOneWidget);
+    expect(find.text('角色朝向：yaw 90.0 / pitch -15.0'), findsOneWidget);
     expect(connection.sessionEpoch, 42);
     expect(connection.playerAttached, isTrue);
+    expect(connection.hasWorldState, isTrue);
     expect(find.text('已收到 1 次連線回應'), findsOneWidget);
+    expect(find.text('已取得伺服器權威角色快照；區塊同步、畫面與遊戲操作仍未啟用。'), findsOneWidget);
     await tester.tap(find.widgetWithText(ElevatedButton, '登出'));
     await tester.pump();
     expect(socket.closed, isTrue);
@@ -79,6 +101,7 @@ void main() {
     expect(connection.account, isEmpty);
     expect(connection.playerUuid, isEmpty);
     expect(connection.playerAttached, isFalse);
+    expect(connection.hasWorldState, isFalse);
     connection.dispose();
   });
 
@@ -155,6 +178,42 @@ void main() {
     socket.receive(hello);
     socket.receive({...authenticated, 'playerAttached': false});
     expect(connection.phase, ConnectionPhase.offline);
+    expect(connection.status, '伺服器回應不相容，請重新連線');
+    connection.dispose();
+  });
+
+  testWidgets('rejects world-state capability without identity contract', (
+    tester,
+  ) async {
+    final socket = FakeTransport();
+    final connection = ObserverConnection(open: (_) => socket);
+    await connection.authenticate(
+      'ws://127.0.0.1:25580/observer/bridge',
+      'alice',
+      'local-test-password',
+    );
+    socket.receive({...hello, 'playerIdentityProtocol': null});
+    expect(connection.phase, ConnectionPhase.offline);
+    expect(socket.sent, isEmpty);
+    expect(connection.status, '伺服器回應不相容，請重新連線');
+    connection.dispose();
+  });
+
+  testWidgets('rejects world snapshot for the wrong request or session', (
+    tester,
+  ) async {
+    final socket = FakeTransport();
+    final connection = ObserverConnection(open: (_) => socket);
+    await connection.authenticate(
+      'ws://127.0.0.1:25580/observer/bridge',
+      'alice',
+      'local-test-password',
+    );
+    socket.receive(hello);
+    socket.receive(authenticated);
+    socket.receive({...worldState, 'sessionEpoch': 41});
+    expect(connection.phase, ConnectionPhase.offline);
+    expect(connection.hasWorldState, isFalse);
     expect(connection.status, '伺服器回應不相容，請重新連線');
     connection.dispose();
   });
