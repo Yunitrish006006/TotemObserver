@@ -125,6 +125,18 @@ class _ConnectionPageState extends State<ConnectionPage> {
                         '登入帳號：${connection.account}',
                         textAlign: TextAlign.center,
                       ),
+                      if (connection.playerName.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          '玩家身分：${connection.playerName}',
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '角色 UUID：${connection.playerUuid}',
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
                       const SizedBox(height: 8),
                       Text(
                         '已收到 ${connection.replies} 次連線回應',
@@ -132,7 +144,7 @@ class _ConnectionPageState extends State<ConnectionPage> {
                       ),
                       const SizedBox(height: 16),
                       const Text(
-                        '目前可登入並確認連線。進入世界功能尚在開發中。',
+                        '已完成帳號與固定玩家身分綁定；進入 Minecraft 世界功能尚在開發中。',
                         textAlign: TextAlign.center,
                       ),
                       const SizedBox(height: 24),
