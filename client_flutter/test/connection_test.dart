@@ -126,7 +126,9 @@ void main() {
     },
   );
 
-  testWidgets('advertised world bootstrap must arrive promptly', (tester) async {
+  testWidgets('advertised world bootstrap must arrive promptly', (
+    tester,
+  ) async {
     final socket = FakeTransport();
     final connection = ObserverConnection(open: (_) => socket);
     await connection.authenticate(
