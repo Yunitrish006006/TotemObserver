@@ -6,7 +6,6 @@ import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 
-import java.lang.reflect.Field;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
@@ -14,26 +13,22 @@ import java.util.UUID;
 /** Optional-module relay for TotemNexus normal-player screen semantics. */
 public final class ObserverNexusRelayManager {
     private static final Map<UUID, Long> LAST_SEQUENCE_BY_TARGET = new HashMap<>();
-    private static final Field TARGET_BY_OBSERVER = staticField("TARGET_BY_OBSERVER");
-    private static final Field SCREEN_CAPABILITIES_BY_OBSERVER = staticField("SCREEN_CAPABILITIES_BY_OBSERVER");
 
     private ObserverNexusRelayManager() {}
 
     public static void acceptState(ServerPlayer target, ObserverNexusScreenPayloads.NexusState payload) {
         if (!valid(payload)) return;
         UUID targetId = target.getUUID();
-        if (!hasCapableObserver(targetId)) return;
+        var observerIds = ObserverNativeSessionManager.observerIdsForTarget(
+                targetId, ObserverNativeScreenPayloads.CAPABILITY_NEXUS);
+        if (observerIds.isEmpty()) return;
         long last = LAST_SEQUENCE_BY_TARGET.getOrDefault(targetId, -1L);
         if (payload.sequence() <= last) return;
         LAST_SEQUENCE_BY_TARGET.put(targetId, payload.sequence());
 
         MinecraftServer server = target.level().getServer();
         var relay = ObserverNexusScreenPayloads.relay(targetId, payload);
-        for (Map.Entry<UUID, UUID> entry : targetByObserver().entrySet()) {
-            if (!targetId.equals(entry.getValue())) continue;
-            UUID observerId = entry.getKey();
-            long capabilities = capabilitiesByObserver().getOrDefault(observerId, 0L);
-            if (!ObserverNativeScreenPayloads.supports(capabilities, ObserverNativeScreenPayloads.CAPABILITY_NEXUS)) continue;
+        for (UUID observerId : observerIds) {
             ServerPlayer observer = server.getPlayerList().getPlayer(observerId);
             if (observer != null && ObserverAccessPolicy.allows(observer, target)
                     && ServerPlayNetworking.canSend(observer, ObserverNexusScreenPayloads.NexusRelay.TYPE)) {
@@ -86,35 +81,4 @@ public final class ObserverNexusRelayManager {
     }
 
     private static boolean percent(int value) { return value >= 0 && value <= 100; }
-
-    private static boolean hasCapableObserver(UUID targetId) {
-        for (Map.Entry<UUID, UUID> entry : targetByObserver().entrySet()) {
-            if (!targetId.equals(entry.getValue())) continue;
-            if (ObserverNativeScreenPayloads.supports(capabilitiesByObserver().getOrDefault(entry.getKey(), 0L),
-                    ObserverNativeScreenPayloads.CAPABILITY_NEXUS)) return true;
-        }
-        return false;
-    }
-
-    private static Field staticField(String name) {
-        try {
-            Field field = ObserverNativeSessionManager.class.getDeclaredField(name);
-            field.setAccessible(true);
-            return field;
-        } catch (ReflectiveOperationException error) {
-            throw new ExceptionInInitializerError(error);
-        }
-    }
-
-    @SuppressWarnings("unchecked")
-    private static Map<UUID, UUID> targetByObserver() {
-        try { return (Map<UUID, UUID>) TARGET_BY_OBSERVER.get(null); }
-        catch (IllegalAccessException error) { throw new IllegalStateException(error); }
-    }
-
-    @SuppressWarnings("unchecked")
-    private static Map<UUID, Long> capabilitiesByObserver() {
-        try { return (Map<UUID, Long>) SCREEN_CAPABILITIES_BY_OBSERVER.get(null); }
-        catch (IllegalAccessException error) { throw new IllegalStateException(error); }
-    }
 }
