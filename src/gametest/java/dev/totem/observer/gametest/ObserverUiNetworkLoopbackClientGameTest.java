@@ -25,7 +25,6 @@ import dev.totem.observer.network.ObserverSmithingScreenPayloads;
 import dev.totem.observer.network.ObserverStatsScreenPayloads;
 import dev.totem.observer.network.ObserverStonecutterScreenPayloads;
 import dev.totem.observer.runtime.ObserverNativeSessionManager;
-import dev.totem.observer.runtime.ObserverSessionManager;
 import net.fabricmc.fabric.api.client.gametest.v1.FabricClientGameTest;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContext;
@@ -89,7 +88,6 @@ public final class ObserverUiNetworkLoopbackClientGameTest implements FabricClie
                 // Give it explicit administrator authority now that native admission checks access too.
                 server.getPlayerList().op(new net.minecraft.server.players.NameAndId(player.getGameProfile()));
                 UUID id = player.getUUID();
-                mainTargetMap().put(id, id);
                 if (!ObserverNativeSessionManager.start(player, player)) throw new AssertionError("Protocol-native loopback session negotiation failed");
                 return id;
             });
@@ -138,7 +136,7 @@ public final class ObserverUiNetworkLoopbackClientGameTest implements FabricClie
 
             UUID expected = playerId;
             boolean serverCleanedUp = singleplayer.getServer().computeOnServer(server ->
-                    !mainTargetMap().containsKey(expected) && !nativeTargetMap().containsKey(expected)
+                    !nativeTargetMap().containsKey(expected)
                             && !nativeScreenCapabilityMap().containsKey(expected));
             if (!serverCleanedUp) throw new AssertionError("Observer Stop did not clean native loopback session state");
         } finally {
@@ -168,7 +166,7 @@ public final class ObserverUiNetworkLoopbackClientGameTest implements FabricClie
     private static void cleanupServer(TestSingleplayerContext singleplayer, UUID playerId) {
         if (playerId == null) return;
         try { singleplayer.getServer().runOnServer(server -> {
-            mainTargetMap().remove(playerId); nativeTargetMap().remove(playerId); nativeScreenCapabilityMap().remove(playerId);
+            nativeTargetMap().remove(playerId); nativeScreenCapabilityMap().remove(playerId);
         }); } catch (Throwable ignored) {}
     }
 
@@ -182,7 +180,6 @@ public final class ObserverUiNetworkLoopbackClientGameTest implements FabricClie
         } catch (Exception error) { throw new RuntimeException("Failed to persist client gametest screenshot " + screenshot, error); }
     }
 
-    @SuppressWarnings("unchecked") private static Map<UUID, UUID> mainTargetMap() { return (Map<UUID, UUID>) getStatic(ObserverSessionManager.class, "TARGET_BY_OBSERVER"); }
     @SuppressWarnings("unchecked") private static Map<UUID, UUID> nativeTargetMap() { return (Map<UUID, UUID>) getStatic(ObserverNativeSessionManager.class, "TARGET_BY_OBSERVER"); }
     @SuppressWarnings("unchecked") private static Map<UUID, Long> nativeScreenCapabilityMap() { return (Map<UUID, Long>) getStatic(ObserverNativeSessionManager.class, "SCREEN_CAPABILITIES_BY_OBSERVER"); }
     private static Object getStatic(Class<?> owner, String name) {
