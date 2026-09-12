@@ -113,7 +113,7 @@ public final class ObserverAccessGameTest {
         boolean friends = rules.get(ObserverGameRules.ALLOW_FRIENDS);
         var player = makePlayer(helper);
         var target = makePlayer(helper);
-        var field = ObserverSessionManager.class.getDeclaredField("TARGET_BY_OBSERVER");
+        var field = ObserverNativeSessionManager.class.getDeclaredField("TARGET_BY_OBSERVER");
         field.setAccessible(true);
         var sessions = (java.util.Map<java.util.UUID, java.util.UUID>) field.get(null);
         var cleanup = ObserverSessionManager.class.getDeclaredMethod("cleanup", net.minecraft.server.MinecraftServer.class);
