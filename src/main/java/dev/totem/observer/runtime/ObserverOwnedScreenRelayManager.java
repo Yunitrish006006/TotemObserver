@@ -52,7 +52,7 @@ public final class ObserverOwnedScreenRelayManager {
             ServerPlayer observer = target.level().getServer().getPlayerList().getPlayer(observerId);
             if (observer != null && ObserverAccessPolicy.allows(observer, target)
                     && ServerPlayNetworking.canSend(observer, ObserverOwnedScreenPayloads.Relay.TYPE)) {
-                if (payload.open()) ObserverNexusTerrainRelay.enqueue(target,observer,snapshot);
+                if (payload.open()) ObserverNexusTerrainRelay.enqueue(target, observer, snapshot);
                 ServerPlayNetworking.send(observer, relay);
             }
         }
@@ -61,6 +61,7 @@ public final class ObserverOwnedScreenRelayManager {
     public static void clearTarget(UUID targetId) {
         LAST.remove(targetId);
         OPEN.remove(targetId);
+        ObserverNexusTerrainRelay.clearTarget(targetId);
     }
 
     public static boolean matchesOpen(UUID targetId, String family, String variant, int protocol) {
