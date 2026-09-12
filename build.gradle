@@ -138,6 +138,18 @@ tutorialStep:none
 
 tasks.withType(Test).configureEach { useJUnitPlatform() }
 
+tasks.register('prepareAccountFixture') {
+    group = 'verification'
+    description = 'Writes the test-only account endpoint launch arguments for browser E2E.'
+    dependsOn testClasses
+    doLast {
+        def argsFile = layout.buildDirectory.file('account-fixture.args').get().asFile
+        argsFile.parentFile.mkdirs()
+        def cp = sourceSets.test.runtimeClasspath.asPath.replace('\\', '\\\\').replace('"', '\\"')
+        argsFile.text = '-classpath\n"' + cp + '"\ndev.totem.observer.bridge.ObserverAccountFixture\n'
+    }
+}
+
 tasks.register('productionGametestModJar', Jar) {
     dependsOn(sourceSets.gametest.classesTaskName, sourceSets.gametest.processResourcesTaskName)
     archiveClassifier = 'production-gametest'

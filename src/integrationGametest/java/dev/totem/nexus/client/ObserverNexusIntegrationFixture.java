@@ -30,9 +30,22 @@ public final class ObserverNexusIntegrationFixture {
 
     public static void prepareZoomedMapView(Screen screen) {
         NexusSpaceUnitMapScreen map = (NexusSpaceUnitMapScreen) screen;
+        var client = net.minecraft.client.Minecraft.getInstance();
+        // Production zoom depends on the initialized Screen and actual map scale.
+        // A synthetic ID without terrain is intentionally limited to 100%.
+        var data = net.minecraft.world.level.saveddata.maps.MapItemSavedData.createForClient(
+                (byte) 1, false, client.level.dimension());
+        java.util.Arrays.fill(data.colors, net.minecraft.world.level.material.MapColor.GRASS
+                .getPackedId(net.minecraft.world.level.material.MapColor.Brightness.NORMAL));
+        client.level.setMapData(new net.minecraft.world.level.saveddata.maps.MapId(
+                map.observerPayload().mapId()), data);
+        client.setScreenAndShow(map);
         if (!map.keyPressed(new KeyEvent(61, 0, 0))
                 || !map.keyPressed(new KeyEvent(264, 0, 1))) {
             throw new AssertionError("Nexus map did not accept zoom and keyboard pan controls");
+        }
+        if (!hasZoomedMapView(map)) {
+            throw new AssertionError("Nexus source fixture did not reach zoom 2 and pan (0, -16)");
         }
     }
 

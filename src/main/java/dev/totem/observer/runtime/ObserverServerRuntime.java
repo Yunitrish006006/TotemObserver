@@ -11,6 +11,7 @@ public final class ObserverServerRuntime {
     private ObserverServerRuntime() {}
 
     public static void register() {
+        dev.totem.observer.bridge.ObserverBridgeLifecycle.register();
         ObserverGameRules.register();
         ObserverReturnState.register();
         ObserverPayloadRegistration.register();

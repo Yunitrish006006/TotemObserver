@@ -33,6 +33,7 @@
       "dev.totem.observer.gametest.ObserverVanillaProductionSenderClientGameTest"
     ],
     "fabric-gametest": [
+      "dev.totem.observer.bridge.ObserverBridgeGameTest",
       "dev.totem.observer.runtime.ObserverAccessGameTest"
     ]
   },

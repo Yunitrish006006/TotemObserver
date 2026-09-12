@@ -8,3 +8,7 @@ run/
 *.log
 .DS_Store
 __pycache__/
+client_flutter/.dart_tool/
+client_flutter/.flutter-plugins-dependencies
+client_flutter/coverage/
+client_flutter/browser_tests/node_modules/

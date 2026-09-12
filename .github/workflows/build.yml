@@ -50,7 +50,43 @@ jobs:
           core_version="$(sed -n 's/^mod_version=//p' .lockstep/TotemCore/gradle.properties)"
           test "$core_version" = '0.7.18'
           core_jar="${GITHUB_WORKSPACE}/.lockstep/TotemCore/build/libs/totem-core-${core_version}.jar"
-          ./gradlew -PtotemCoreJar="$core_jar" clean test assemble compileGametestJava runGameTest --no-daemon --stacktrace
+          ./gradlew -PtotemCoreJar="$core_jar" clean test assemble compileGametestJava runGameTest prepareAccountFixture --no-daemon --stacktrace
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.0'
+          channel: stable
+          cache: true
+
+      - name: Validate and build Flutter client
+        working-directory: client_flutter
+        run: |
+          flutter pub get --enforce-lockfile
+          dart format --output=none --set-exit-if-changed lib test
+          flutter analyze
+          flutter test
+          flutter build web --release --no-web-resources-cdn
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify browser account flow
+        working-directory: client_flutter/browser_tests
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          npm test
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: observer-web-client-and-browser-evidence
+          path: |
+            client_flutter/build/web
+            build/account-browser-evidence/*.png
+            build/account-browser-evidence/result.json
 
       - name: Enforce Observer extraction invariants
         shell: bash

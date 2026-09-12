@@ -2,6 +2,8 @@
 
 Dedicated Observer View runtime for the Totem Minecraft ecosystem.
 
+An opt-in, loopback-only multiplayer web client prototype now provides custom-account registration, login and revocable connection sessions through an embedded Observer bridge. See the [Flutter client instructions](client_flutter/README.md) for activation and [multiplayer client progress](docs/multiplayer-client-progress.md) for validation and the remaining gameplay roadmap. Player/world access is still under development.
+
 TotemObserver owns the cross-cutting runtime behind `/observeui`: server-authoritative session control, spectator view relay, semantic vanilla Screen reconstruction, module-owned Screen transport, remote cursor state, and the read-only client firewall. It is not a framebuffer/video streaming mod.
 
 ## Platform
