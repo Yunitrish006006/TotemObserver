@@ -19,6 +19,7 @@ import net.minecraft.server.network.CommonListenerCookie;
 import net.minecraft.util.ProblemReporter;
 import net.minecraft.world.level.storage.TagValueInput;
 
+import java.net.InetSocketAddress;
 import java.util.ArrayList;
 import java.util.Map;
 import java.util.Objects;
@@ -32,6 +33,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * supplies a profile or UUID: those arrive only through {@link ObserverPlaySessionService}.</p>
  */
 public final class ObserverPlayerAdmissionService implements AutoCloseable {
+    private static final InetSocketAddress BRIDGE_ADDRESS = new InetSocketAddress("127.0.0.1", 0);
+
     public record Admission(ObserverPlaySessionService.Session playSession, ServerPlayer player) {
         public Admission {
             Objects.requireNonNull(playSession, "playSession");
@@ -96,6 +99,11 @@ public final class ObserverPlayerAdmissionService implements AutoCloseable {
 
         var profile = new GameProfile(identity.uuid(), identity.profileName());
         var player = new ServerPlayer(server, server.overworld(), profile, ClientInformation.createDefault());
+        // Reuse vanilla ban/whitelist/capacity policy. The bridge is loopback-only, so its transport address is loopback.
+        if (playerList.canPlayerLogin(BRIDGE_ADDRESS, player.nameAndId()) != null) {
+            throw new IllegalStateException("Observer player rejected by server admission policy");
+        }
+
         var connection = new ObserverClientConnection(server);
         boolean placed = false;
         try (var problems = new ProblemReporter.ScopedCollector(player.problemPath(), TotemObserver.LOGGER)) {
@@ -168,7 +176,11 @@ public final class ObserverPlayerAdmissionService implements AutoCloseable {
         @Override public void send(Packet<?> packet, ChannelFutureListener listener, boolean flush) {
             if (packet instanceof ClientboundKeepAlivePacket keepAlive) {
                 var target = serverListener;
-                if (target != null) server.execute(() -> target.handleKeepAlive(new ServerboundKeepAlivePacket(keepAlive.getId())));
+                if (target != null) {
+                    server.execute(() -> {
+                        if (serverListener == target) target.handleKeepAlive(new ServerboundKeepAlivePacket(keepAlive.getId()));
+                    });
+                }
             }
         }
 
