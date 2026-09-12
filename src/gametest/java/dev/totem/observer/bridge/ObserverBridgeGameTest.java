@@ -24,7 +24,7 @@ public final class ObserverBridgeGameTest {
     }
 
     @GameTest(maxTicks = 100_000)
-    public void admittedPlayerUsesPlayerListAndReloadsSavedInventory(GameTestHelper helper) {
+    public void admittedPlayerReplacementSavesAndReloadsVanillaPlayerData(GameTestHelper helper) {
         var server = helper.getLevel().getServer();
         String account = "gt_" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
         try (var playSessions = new ObserverPlaySessionService();
@@ -43,26 +43,39 @@ public final class ObserverBridgeGameTest {
             UUID expectedId = playerA.getUUID();
             String expectedName = playerA.getGameProfile().name();
 
-            admissions.release(first);
-            playSessions.release(playA);
-            if (server.getPlayerList().getPlayer(expectedId) != null) {
-                helper.fail("Released Observer player remained in PlayerList");
-            }
-
+            // Re-authentication replaces the active identity without explicitly releasing the old admission first.
             var authB = new ObserverAccountService.Session(account, UUID.randomUUID());
             var playB = playSessions.open(authB);
             var second = admissions.open(playB).join();
-            if (second == null || !second.player().getUUID().equals(expectedId)
+            if (second == null || second.player() == playerA
+                    || !second.player().getUUID().equals(expectedId)
                     || !second.player().getGameProfile().name().equals(expectedName)) {
-                helper.fail("Observer reconnect did not restore the same server-owned identity");
+                helper.fail("Observer replacement did not restore the same server-owned identity");
+            }
+            if (server.getPlayerList().getPlayer(expectedId) != second.player()) {
+                helper.fail("Replacement Observer player is not the sole PlayerList entry for its UUID");
+            }
+            if (admissions.valid(playA, first)) {
+                helper.fail("Replaced Observer admission remained valid");
             }
             if (!second.player().getInventory().getItem(0).is(Items.DIAMOND)
                     || second.player().getInventory().getItem(0).getCount() != 7
                     || second.player().getHealth() != 13.0F) {
-                helper.fail("Observer reconnect did not reload vanilla playerdata");
+                helper.fail("Observer replacement did not reload vanilla playerdata");
             }
+
+            // A delayed cleanup from the old socket must not remove the replacement player.
+            admissions.release(first);
+            if (server.getPlayerList().getPlayer(expectedId) != second.player()
+                    || !admissions.valid(playB, second)) {
+                helper.fail("Stale Observer release removed the replacement player");
+            }
+
             admissions.release(second);
             playSessions.release(playB);
+            if (server.getPlayerList().getPlayer(expectedId) != null) {
+                helper.fail("Released Observer player remained in PlayerList");
+            }
         }
         helper.succeed();
     }
