@@ -24,9 +24,9 @@ class ObserverPlaySessionServiceTest {
     @Test void playSessionIsBoundToTheCurrentAuthenticationSession() {
         try (var service = new ObserverPlaySessionService()) {
             var authenticationA = new ObserverAccountService.Session("alice",
-                    UUID.fromString("11111111-1111-1111-1111-111111111111"));
+                    UUID.fromString("11111111-1111-1111-2222-222222222222"));
             var authenticationB = new ObserverAccountService.Session("alice",
-                    UUID.fromString("22222222-2222-2222-2222-222222222222"));
+                    UUID.fromString("33333333-3333-3333-4444-444444444444"));
 
             var first = service.open(authenticationA);
             assertNotNull(first);
