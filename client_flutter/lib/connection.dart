@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'world/world_bootstrap.dart';
+import 'world/world_state.dart';
+import 'world/world_window.dart';
 
 abstract interface class BridgeTransport {
   Stream<dynamic> get messages;
@@ -43,7 +45,8 @@ class ObserverConnection extends ChangeNotifier {
       _sequence = 0,
       _lastPong = -1,
       _identityProtocol = 0,
-      _worldProtocol = 0;
+      _worldProtocol = 0,
+      _worldWindowProtocol = 0;
   String? _login;
   String _expectedAccount = '';
   bool _hello = false, _disposed = false, _playerAdmissionAvailable = false;
@@ -54,7 +57,7 @@ class ObserverConnection extends ChangeNotifier {
   String playerName = '';
   int sessionEpoch = 0;
   bool playerAttached = false;
-  WorldBootstrap? world;
+  WorldState? world;
   int replies = 0;
 
   Future<void> authenticate(
@@ -144,9 +147,17 @@ class ObserverConnection extends ChangeNotifier {
               (identityProtocol != 1 || playerAdmission != true)) {
             throw const FormatException();
           }
+          final worldWindowProtocol = message['worldWindowProtocol'];
+          if (worldWindowProtocol != null && worldWindowProtocol != 1) {
+            throw const FormatException();
+          }
+          if (worldWindowProtocol == 1 && worldProtocol != 1) {
+            throw const FormatException();
+          }
           _identityProtocol = identityProtocol == 1 ? 1 : 0;
           _playerAdmissionAvailable = playerAdmission == true;
           _worldProtocol = worldProtocol == 1 ? 1 : 0;
+          _worldWindowProtocol = worldWindowProtocol == 1 ? 1 : 0;
           _hello = true;
           _transport!.send(_login!);
           _login = null;
@@ -183,7 +194,7 @@ class ObserverConnection extends ChangeNotifier {
           account = _expectedAccount;
           phase = ConnectionPhase.connected;
           status = _worldProtocol == 1 && playerAttached
-              ? '玩家已接入 Minecraft，等待世界核心同步…'
+              ? '玩家已接入 Minecraft，等待世界控制面同步…'
               : playerAttached
               ? '玩家已接入 Minecraft'
               : _identityProtocol == 1
@@ -192,7 +203,7 @@ class ObserverConnection extends ChangeNotifier {
           if (_worldProtocol == 1 && playerAttached) {
             _worldDeadline = Timer(
               const Duration(seconds: 5),
-              () => _fail('世界核心同步逾時，請重新連線'),
+              () => _fail('世界控制面同步逾時，請重新連線'),
             );
           }
           _watchResponse();
@@ -212,9 +223,29 @@ class ObserverConnection extends ChangeNotifier {
           if (bootstrap.sessionEpoch != sessionEpoch) {
             throw const FormatException();
           }
+          world = WorldState.bootstrap(bootstrap);
+          if (_worldWindowProtocol == 1) {
+            status = '玩家已接入 Minecraft，世界核心已同步，等待區塊視窗…';
+          } else {
+            _worldDeadline?.cancel();
+            status = '玩家已接入 Minecraft，世界核心已同步';
+          }
+          _notify();
+        case 'world_window':
+          if (phase != ConnectionPhase.connected ||
+              _worldWindowProtocol != 1 ||
+              !playerAttached ||
+              world == null ||
+              world!.window != null) {
+            throw const FormatException();
+          }
+          final window = WorldWindow.fromMessage(message);
+          if (window.sessionEpoch != sessionEpoch) {
+            throw const FormatException();
+          }
+          world = world!.attachInitialWindow(window);
           _worldDeadline?.cancel();
-          world = bootstrap;
-          status = '玩家已接入 Minecraft，世界核心已同步';
+          status = '玩家已接入 Minecraft，世界控制面已同步';
           _notify();
         case 'pong':
           final seq = message['seq'];
@@ -278,6 +309,7 @@ class ObserverConnection extends ChangeNotifier {
     _expectedAccount = '';
     _identityProtocol = 0;
     _worldProtocol = 0;
+    _worldWindowProtocol = 0;
     _playerAdmissionAvailable = false;
     _sequence = 0;
     _lastPong = -1;

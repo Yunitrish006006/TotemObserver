@@ -90,6 +90,7 @@ class _ConnectionPageState extends State<ConnectionPage> {
                 final online = connection.phase == ConnectionPhase.connected;
                 final busy = connection.phase == ConnectionPhase.connecting;
                 final world = connection.world;
+                final window = world?.window;
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
@@ -157,8 +158,16 @@ class _ConnectionPageState extends State<ConnectionPage> {
                           textAlign: TextAlign.center,
                         ),
                         const SizedBox(height: 4),
-                        const Text(
-                          '世界核心：bootstrap v1（尚未包含區塊與操作）',
+                        if (window != null)
+                          Text(
+                            '區塊視窗：中心 ${window.centerChunkX}, ${window.centerChunkZ}；半徑 ${window.radius}（${world.requestedChunkCount} 個 chunk identity）',
+                            textAlign: TextAlign.center,
+                          ),
+                        const SizedBox(height: 4),
+                        Text(
+                          window != null
+                              ? '世界核心：bootstrap v1 + window v1（尚未包含 chunk payload）'
+                              : '世界核心：bootstrap v1（尚未包含區塊與操作）',
                           textAlign: TextAlign.center,
                         ),
                       ],
@@ -169,7 +178,9 @@ class _ConnectionPageState extends State<ConnectionPage> {
                       ),
                       const SizedBox(height: 16),
                       Text(
-                        world != null
+                        window != null
+                            ? '已取得伺服器權威的世界控制面與 chunk identity；方塊內容、實體同步、光照與遊戲操作仍在開發中。'
+                            : world != null
                             ? '已取得伺服器權威的初始世界狀態；區塊畫面、實體同步與遊戲操作仍在開發中。'
                             : connection.playerAttached
                             ? '角色已存在於伺服器世界並使用原版 playerdata；區塊畫面與遊戲操作仍在開發中。'

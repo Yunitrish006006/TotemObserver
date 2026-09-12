@@ -118,8 +118,9 @@ public final class ObserverBridgeGameTest {
                                 text.setLength(0);
                                 if (authenticated && message.startsWith("{\"type\":\"hello\"")) {
                                     if (!message.contains("\"playerAdmission\":true")
-                                            || !message.contains("\"worldProtocol\":1")) {
-                                        pong.completeExceptionally(new IllegalStateException("Player/world bootstrap capability missing"));
+                                            || !message.contains("\"worldProtocol\":1")
+                                            || !message.contains("\"worldWindowProtocol\":1")) {
+                                        pong.completeExceptionally(new IllegalStateException("Player/world control-plane capability missing"));
                                     } else {
                                         socket.sendText("{\"type\":\"register\",\"username\":\"gametest\",\"password\":\"isolated-test-password\"}", true);
                                     }
@@ -134,6 +135,17 @@ public final class ObserverBridgeGameTest {
                                             || !message.contains("\"sessionEpoch\":")
                                             || !message.endsWith("\"play\":false}")) {
                                         pong.completeExceptionally(new IllegalStateException("Invalid world bootstrap"));
+                                    }
+                                } else if (message.startsWith("{\"type\":\"world_window\"")) {
+                                    if (!authenticated
+                                            || !message.contains("\"protocol\":1")
+                                            || !message.contains("\"dimension\":\"minecraft:overworld\"")
+                                            || !message.contains("\"centerChunkX\":")
+                                            || !message.contains("\"centerChunkZ\":")
+                                            || !message.contains("\"radius\":1")
+                                            || !message.contains("\"revision\":1")
+                                            || !message.endsWith("\"play\":false}")) {
+                                        pong.completeExceptionally(new IllegalStateException("Invalid world window"));
                                     } else {
                                         socket.sendText("{\"type\":\"ping\",\"seq\":0}", true);
                                     }

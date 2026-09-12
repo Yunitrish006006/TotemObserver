@@ -43,7 +43,9 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
         if (event instanceof WebSocketServerProtocolHandler.HandshakeComplete handshake && PROTOCOL.equals(handshake.selectedSubprotocol())) {
             selected = true;
             ctx.channel().attr(ObserverBridgeServer.READY).set(true);
-            String worldCapability = worldBootstrap == null ? "" : ",\"worldProtocol\":" + ObserverWorldBootstrapService.PROTOCOL;
+            String worldCapability = worldBootstrap == null ? ""
+                    : ",\"worldProtocol\":" + ObserverWorldBootstrapService.PROTOCOL
+                    + ",\"worldWindowProtocol\":" + ObserverWorldWindow.PROTOCOL;
             send(ctx, "{\"type\":\"hello\",\"protocol\":1,\"authentication\":true,\"registration\":" + accounts.registrationAllowed()
                     + ",\"playerIdentityProtocol\":" + ObserverPlaySessionService.PROTOCOL
                     + ",\"playerAdmission\":" + (playerAdmissions != null) + worldCapability + ",\"play\":false}");
@@ -161,12 +163,25 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
             stop(ctx, "World bootstrap failed");
             return;
         }
+        final ObserverWorldWindow.Snapshot window;
+        try {
+            window = ObserverWorldWindow.initial(snapshot);
+        } catch (RuntimeException invalid) {
+            stop(ctx, "World window failed");
+            return;
+        }
         send(ctx, "{\"type\":\"world_bootstrap\",\"protocol\":" + ObserverWorldBootstrapService.PROTOCOL
                 + ",\"sessionEpoch\":" + snapshot.sessionEpoch()
                 + ",\"dimension\":\"" + snapshot.dimension()
                 + "\",\"x\":" + snapshot.x() + ",\"y\":" + snapshot.y() + ",\"z\":" + snapshot.z()
                 + ",\"yaw\":" + snapshot.yaw() + ",\"pitch\":" + snapshot.pitch()
                 + ",\"gameTime\":" + snapshot.gameTime() + ",\"defaultClockTime\":" + snapshot.defaultClockTime()
+                + ",\"play\":false}");
+        send(ctx, "{\"type\":\"world_window\",\"protocol\":" + ObserverWorldWindow.PROTOCOL
+                + ",\"sessionEpoch\":" + window.sessionEpoch()
+                + ",\"dimension\":\"" + window.dimension()
+                + "\",\"centerChunkX\":" + window.centerChunkX() + ",\"centerChunkZ\":" + window.centerChunkZ()
+                + ",\"radius\":" + window.radius() + ",\"revision\":" + window.revision()
                 + ",\"play\":false}");
     }
 
