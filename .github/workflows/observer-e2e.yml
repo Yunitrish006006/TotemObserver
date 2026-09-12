@@ -97,6 +97,20 @@ jobs:
         shell: bash
         run: bash .github/scripts/run-observer-e2e.sh
 
+      - name: Verify admitted player is visible to a normal Java client
+        shell: bash
+        run: |
+          set -euo pipefail
+          for marker in \
+            server-bridge-player-admitted.txt \
+            target-bridge-player-visible.txt \
+            server-bridge-player-release-requested.txt \
+            server-bridge-player-released.txt \
+            target-bridge-player-removed.txt \
+            server-bridge-player-visibility-complete.txt; do
+            test -s "build/e2e/results/${marker}"
+          done
+
       - name: Upload Observer E2E evidence
         if: always()
         uses: actions/upload-artifact@v4

@@ -38,13 +38,17 @@ class ObserverConnection extends ChangeNotifier {
   BridgeTransport? _transport;
   StreamSubscription<dynamic>? _subscription;
   Timer? _deadline, _heartbeat, _responseDeadline;
-  int _generation = 0, _sequence = 0, _lastPong = -1;
+  int _generation = 0, _sequence = 0, _lastPong = -1, _identityProtocol = 0;
   String? _login;
   String _expectedAccount = '';
-  bool _hello = false, _disposed = false;
+  bool _hello = false, _disposed = false, _playerAdmissionAvailable = false;
   ConnectionPhase phase = ConnectionPhase.offline;
   String status = '尚未連線';
   String account = '';
+  String playerUuid = '';
+  String playerName = '';
+  int sessionEpoch = 0;
+  bool playerAttached = false;
   int replies = 0;
 
   Future<void> authenticate(
@@ -118,6 +122,16 @@ class ObserverConnection extends ChangeNotifier {
               message['authentication'] != true) {
             throw const FormatException();
           }
+          final identityProtocol = message['playerIdentityProtocol'];
+          if (identityProtocol != null && identityProtocol != 1) {
+            throw const FormatException();
+          }
+          final playerAdmission = message['playerAdmission'];
+          if (playerAdmission != null && playerAdmission is! bool) {
+            throw const FormatException();
+          }
+          _identityProtocol = identityProtocol == 1 ? 1 : 0;
+          _playerAdmissionAvailable = playerAdmission == true;
           _hello = true;
           _transport!.send(_login!);
           _login = null;
@@ -128,10 +142,36 @@ class ObserverConnection extends ChangeNotifier {
               message['play'] != false) {
             throw const FormatException();
           }
+          if (_identityProtocol == 1) {
+            final uuid = message['playerUuid'];
+            final name = message['playerName'];
+            final epoch = message['sessionEpoch'];
+            final attached = message['playerAttached'];
+            if (uuid is! String ||
+                !RegExp(
+                  r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+                ).hasMatch(uuid) ||
+                name is! String ||
+                !RegExp(r'^obs_[0-9a-f]{12}$').hasMatch(name) ||
+                epoch is! int ||
+                epoch <= 0 ||
+                (attached != null && attached is! bool) ||
+                (_playerAdmissionAvailable && attached != true)) {
+              throw const FormatException();
+            }
+            playerUuid = uuid;
+            playerName = name;
+            sessionEpoch = epoch;
+            playerAttached = attached == true;
+          }
           _deadline?.cancel();
           account = _expectedAccount;
           phase = ConnectionPhase.connected;
-          status = '已連線';
+          status = playerAttached
+              ? '玩家已接入 Minecraft'
+              : _identityProtocol == 1
+              ? '已驗證玩家身分'
+              : '已連線';
           _watchResponse();
           _heartbeat = Timer.periodic(
             const Duration(seconds: 5),
@@ -197,10 +237,16 @@ class ObserverConnection extends ChangeNotifier {
     _login = null;
     _hello = false;
     _expectedAccount = '';
+    _identityProtocol = 0;
+    _playerAdmissionAvailable = false;
     _sequence = 0;
     _lastPong = -1;
     replies = 0;
     account = '';
+    playerUuid = '';
+    playerName = '';
+    sessionEpoch = 0;
+    playerAttached = false;
     phase = ConnectionPhase.offline;
     status = '尚未連線';
     _notify();

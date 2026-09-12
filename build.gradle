@@ -136,6 +136,19 @@ tutorialStep:none
     }
 }
 
+tasks.named('runGameTest').configure {
+    doFirst {
+        // The full server GameTest batch creates several embedded/fake players concurrently.
+        // Keep production admission policy intact while giving only this isolated test server headroom.
+        File dir = file('build/run/gameTest')
+        dir.mkdirs()
+        new File(dir, 'server.properties').text = '''online-mode=false
+spawn-protection=0
+max-players=32
+'''
+    }
+}
+
 tasks.withType(Test).configureEach { useJUnitPlatform() }
 
 tasks.register('prepareAccountFixture') {

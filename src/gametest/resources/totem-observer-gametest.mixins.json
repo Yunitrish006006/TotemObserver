@@ -1,0 +1,11 @@
+{
+  "required": true,
+  "package": "dev.totem.observer.gametest.mixin",
+  "compatibilityLevel": "JAVA_25",
+  "mixins": [
+    "ObserverGameTestServerCapacityMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

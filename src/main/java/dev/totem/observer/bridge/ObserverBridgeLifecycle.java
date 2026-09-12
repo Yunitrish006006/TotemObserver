@@ -18,13 +18,14 @@ public final class ObserverBridgeLifecycle {
                         .resolve("totem-observer/accounts-v1.properties");
                 var accounts = new ObserverAccountService(new ObserverAccountStore(file),
                         Boolean.getBoolean("totem.observer.bridge.registration"));
-                bridge = new ObserverBridgeServer(accounts);
+                bridge = new ObserverBridgeServer(accounts, new ObserverPlaySessionService(),
+                        new ObserverPlayerAdmissionService(server));
                 int bound = bridge.start(port, System.getProperty("totem.observer.bridge.origin", "http://localhost:8080"));
-                TotemObserver.LOGGER.info("Observer bootstrap bridge listening on loopback port {}; gameplay unavailable", bound);
+                TotemObserver.LOGGER.info("Observer bridge listening on loopback port {}; authenticated players are admitted, world streaming unavailable", bound);
             } catch (Exception failure) {
                 if (bridge != null) bridge.close();
                 bridge = null;
-                TotemObserver.LOGGER.error("Observer bootstrap bridge could not start; check its local configuration and port availability");
+                TotemObserver.LOGGER.error("Observer bridge could not start; check its local configuration and port availability");
             }
         });
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> {

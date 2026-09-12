@@ -6,7 +6,8 @@
   "environment": "*",
   "entrypoints": {
     "main": [
-      "dev.totem.observer.e2e.ObserverE2eCommon"
+      "dev.totem.observer.e2e.ObserverE2eCommon",
+      "dev.totem.observer.bridge.ObserverBridgeAdmissionE2eCoordinator"
     ],
     "client": [
       "dev.totem.observer.e2e.ObserverMerchantE2eBridge",
@@ -31,6 +32,7 @@
       "dev.totem.observer.e2e.ObserverAdvancementsE2eBridge",
       "dev.totem.observer.e2e.ObserverStatsE2eBridge",
       "dev.totem.observer.e2e.ObserverHorseE2eBridge",
+      "dev.totem.observer.e2e.ObserverBridgeAdmissionVisibilityE2eClient",
       "dev.totem.observer.e2e.ObserverE2eClient",
       "dev.totem.observer.e2e.ObserverCraftingE2eBridge"
     ]
