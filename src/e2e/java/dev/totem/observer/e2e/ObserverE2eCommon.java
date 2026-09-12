@@ -3,7 +3,7 @@ package dev.totem.observer.e2e;
 import dev.totem.observer.network.ObserverNativePayloads;
 import dev.totem.observer.network.ObserverNativeScreenPayloads;
 import dev.totem.observer.network.ObserverPayloads;
-import dev.totem.observer.runtime.ObserverSessionManager;
+import dev.totem.observer.runtime.ObserverNativeSessionManager;
 import dev.totem.observer.runtime.ObserverGameRules;
 import dev.totem.observer.runtime.ObserverReturnState;
 import dev.totem.core.api.v1.social.TotemFriendshipApi;
@@ -193,7 +193,7 @@ public final class ObserverE2eCommon implements ModInitializer {
 
     @SuppressWarnings("unchecked")
     private static Map<UUID, UUID> targetMap() {
-        return (Map<UUID, UUID>) staticField(ObserverSessionManager.class, "TARGET_BY_OBSERVER");
+        return (Map<UUID, UUID>) staticField(ObserverNativeSessionManager.class, "TARGET_BY_OBSERVER");
     }
 
     private static Object staticField(Class<?> owner, String name) {
