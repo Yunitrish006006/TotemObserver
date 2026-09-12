@@ -37,7 +37,7 @@ public final class ObserverNexusIntegrationFixture {
                 (byte) 1, false, client.level.dimension());
         java.util.Arrays.fill(data.colors, net.minecraft.world.level.material.MapColor.GRASS
                 .getPackedId(net.minecraft.world.level.material.MapColor.Brightness.NORMAL));
-        client.level.setMapData(new net.minecraft.world.level.saveddata.maps.MapId(
+        client.level.overrideMapData(new net.minecraft.world.level.saveddata.maps.MapId(
                 map.observerPayload().mapId()), data);
         client.setScreenAndShow(map);
         if (!map.keyPressed(new KeyEvent(61, 0, 0))
