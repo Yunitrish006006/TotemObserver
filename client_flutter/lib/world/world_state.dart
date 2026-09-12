@@ -31,7 +31,8 @@ class WorldState {
   int get gameTime => bootstrap.gameTime;
   int get defaultClockTime => bootstrap.defaultClockTime;
   int get requestedChunkCount => window?.chunkCount ?? 0;
-  Iterable<ChunkKey> get requestedChunks => window?.chunks ?? const <ChunkKey>[];
+  Iterable<ChunkKey> get requestedChunks =>
+      window?.chunks ?? const <ChunkKey>[];
 
   static int _chunkCoordinate(double blockCoordinate) =>
       blockCoordinate.floor() >> 4;
