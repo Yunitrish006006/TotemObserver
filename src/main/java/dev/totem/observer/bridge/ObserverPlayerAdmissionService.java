@@ -100,8 +100,9 @@ public final class ObserverPlayerAdmissionService implements AutoCloseable {
         var profile = new GameProfile(identity.uuid(), identity.profileName());
         var player = new ServerPlayer(server, server.overworld(), profile, ClientInformation.createDefault());
         // Reuse vanilla ban/whitelist/capacity policy. The bridge is loopback-only, so its transport address is loopback.
-        if (playerList.canPlayerLogin(BRIDGE_ADDRESS, player.nameAndId()) != null) {
-            throw new IllegalStateException("Observer player rejected by server admission policy");
+        var rejection = playerList.canPlayerLogin(BRIDGE_ADDRESS, player.nameAndId());
+        if (rejection != null) {
+            throw new IllegalStateException("Observer player rejected by server admission policy: " + rejection.getString());
         }
 
         var connection = new ObserverClientConnection(server);
