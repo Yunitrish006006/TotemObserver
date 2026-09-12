@@ -9,6 +9,9 @@ import net.minecraft.network.PacketListener;
 import net.minecraft.network.ProtocolInfo;
 import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.PacketFlow;
+import net.minecraft.network.protocol.common.ClientboundKeepAlivePacket;
+import net.minecraft.network.protocol.common.ServerCommonPacketListener;
+import net.minecraft.network.protocol.common.ServerboundKeepAlivePacket;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ClientInformation;
 import net.minecraft.server.level.ServerPlayer;
@@ -93,7 +96,7 @@ public final class ObserverPlayerAdmissionService implements AutoCloseable {
 
         var profile = new GameProfile(identity.uuid(), identity.profileName());
         var player = new ServerPlayer(server, server.overworld(), profile, ClientInformation.createDefault());
-        var connection = new ObserverClientConnection();
+        var connection = new ObserverClientConnection(server);
         boolean placed = false;
         try (var problems = new ProblemReporter.ScopedCollector(player.problemPath(), TotemObserver.LOGGER)) {
             var loaded = playerList.loadPlayerData(player.nameAndId())
@@ -141,24 +144,36 @@ public final class ObserverPlayerAdmissionService implements AutoCloseable {
     }
 
     /**
-     * A local, packet-sink connection used only so vanilla can construct a normal ServerGamePacketListenerImpl.
-     * Clientbound packets are intentionally discarded until Step 4 owns world streaming.
+     * Local packet sink used so vanilla owns a normal ServerGamePacketListenerImpl. World packets are
+     * discarded until Step 4. Native keepalive challenges are answered internally so the vanilla
+     * listener stays alive; this never creates gameplay input or bypasses the Observer auth session.
      */
     private static final class ObserverClientConnection extends Connection {
+        private final MinecraftServer server;
         private final EmbeddedChannel embeddedChannel;
+        private volatile ServerCommonPacketListener serverListener;
 
-        ObserverClientConnection() {
+        ObserverClientConnection(MinecraftServer server) {
             super(PacketFlow.SERVERBOUND);
+            this.server = server;
             embeddedChannel = new EmbeddedChannel(this);
         }
 
         @Override public void setReadOnly() {}
         @Override public void handleDisconnection() {}
         @Override public void setListenerForServerboundHandshake(PacketListener listener) {}
-        @Override public <T extends PacketListener> void setupInboundProtocol(ProtocolInfo<T> protocol, T listener) {}
-        @Override public void send(Packet<?> packet, ChannelFutureListener listener, boolean flush) {}
+        @Override public <T extends PacketListener> void setupInboundProtocol(ProtocolInfo<T> protocol, T listener) {
+            if (listener instanceof ServerCommonPacketListener common) serverListener = common;
+        }
+        @Override public void send(Packet<?> packet, ChannelFutureListener listener, boolean flush) {
+            if (packet instanceof ClientboundKeepAlivePacket keepAlive) {
+                var target = serverListener;
+                if (target != null) server.execute(() -> target.handleKeepAlive(new ServerboundKeepAlivePacket(keepAlive.getId())));
+            }
+        }
 
         void closeEmbeddedChannel() {
+            serverListener = null;
             embeddedChannel.close();
         }
     }
