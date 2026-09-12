@@ -31,6 +31,7 @@ public final class ObserverBridgeServer implements AutoCloseable {
     private final ObserverAccountService accounts;
     private final ObserverPlaySessionService playSessions;
     private final ObserverPlayerAdmissionService playerAdmissions;
+    private final ObserverWorldBootstrapService worldBootstrap;
     private final EventLoopGroup acceptor = new NioEventLoopGroup(1, new DefaultThreadFactory("observer-bridge-accept", true));
     private final EventLoopGroup workers = new NioEventLoopGroup(1, new DefaultThreadFactory("observer-bridge-io", true));
     private final DefaultChannelGroup channels = new DefaultChannelGroup(workers.next(), true);
@@ -38,20 +39,27 @@ public final class ObserverBridgeServer implements AutoCloseable {
     private Channel listener;
     private boolean closed;
 
-    public ObserverBridgeServer() { this(null, null, null); }
+    public ObserverBridgeServer() { this(null, null, null, null); }
     public ObserverBridgeServer(ObserverAccountService accounts) {
-        this(accounts, accounts == null ? null : new ObserverPlaySessionService(), null);
+        this(accounts, accounts == null ? null : new ObserverPlaySessionService(), null, null);
     }
     ObserverBridgeServer(ObserverAccountService accounts, ObserverPlaySessionService playSessions) {
-        this(accounts, playSessions, null);
+        this(accounts, playSessions, null, null);
     }
     ObserverBridgeServer(ObserverAccountService accounts, ObserverPlaySessionService playSessions,
                          ObserverPlayerAdmissionService playerAdmissions) {
+        this(accounts, playSessions, playerAdmissions, null);
+    }
+    ObserverBridgeServer(ObserverAccountService accounts, ObserverPlaySessionService playSessions,
+                         ObserverPlayerAdmissionService playerAdmissions,
+                         ObserverWorldBootstrapService worldBootstrap) {
         if ((accounts == null) != (playSessions == null)) throw new IllegalArgumentException("Account/play session services must match");
         if (playerAdmissions != null && accounts == null) throw new IllegalArgumentException("Player admission requires account sessions");
+        if (worldBootstrap != null && playerAdmissions == null) throw new IllegalArgumentException("World bootstrap requires player admission");
         this.accounts = accounts;
         this.playSessions = playSessions;
         this.playerAdmissions = playerAdmissions;
+        this.worldBootstrap = worldBootstrap;
     }
 
     /** Binds IPv4 loopback only until authenticated remote play is implemented. Port 0 is for tests. */
@@ -74,7 +82,7 @@ public final class ObserverBridgeServer implements AutoCloseable {
                                             .websocketPath(PATH).subprotocols(accounts == null ? PROTOCOL : PROTOCOL + "," + ObserverAuthenticatedExchange.PROTOCOL).checkStartsWith(false)
                                             .maxFramePayloadLength(accounts == null ? MAX_FRAME_BYTES : 1024).allowExtensions(false)
                                             .handshakeTimeoutMillis(5000).build()),
-                                    new ObserverAuthenticatedExchange(accounts, playSessions, playerAdmissions), new Exchange());
+                                    new ObserverAuthenticatedExchange(accounts, playSessions, playerAdmissions, worldBootstrap), new Exchange());
                         }
                     }).bind(new InetSocketAddress("127.0.0.1", port)).awaitUninterruptibly();
             if (!binding.isSuccess()) throw new IllegalStateException("Bridge bind failed", binding.cause());

@@ -101,8 +101,9 @@ public final class ObserverBridgeGameTest {
                         new ObserverAccountStore(temporary.resolve("accounts.properties")), true) : null;
                 var playSessions = authenticated ? new ObserverPlaySessionService() : null;
                 var admissions = authenticated ? new ObserverPlayerAdmissionService(server) : null;
+                var worldBootstrap = authenticated ? new ObserverWorldBootstrapService(server) : null;
                 try (var bridge = authenticated
-                        ? new ObserverBridgeServer(accounts, playSessions, admissions)
+                        ? new ObserverBridgeServer(accounts, playSessions, admissions, worldBootstrap)
                         : new ObserverBridgeServer(accounts);
                      var client = HttpClient.newHttpClient()) {
                     int port = bridge.start(0, "http://localhost:8080");
@@ -116,14 +117,35 @@ public final class ObserverBridgeGameTest {
                                 String message = text.toString();
                                 text.setLength(0);
                                 if (authenticated && message.startsWith("{\"type\":\"hello\"")) {
-                                    if (!message.contains("\"playerAdmission\":true")) {
-                                        pong.completeExceptionally(new IllegalStateException("Player admission capability missing"));
+                                    if (!message.contains("\"playerAdmission\":true")
+                                            || !message.contains("\"worldProtocol\":1")
+                                            || !message.contains("\"worldWindowProtocol\":1")) {
+                                        pong.completeExceptionally(new IllegalStateException("Player/world control-plane capability missing"));
                                     } else {
                                         socket.sendText("{\"type\":\"register\",\"username\":\"gametest\",\"password\":\"isolated-test-password\"}", true);
                                     }
                                 } else if (message.startsWith("{\"type\":\"authenticated\"")) {
                                     if (authenticated && !message.contains("\"playerAttached\":true")) {
                                         pong.completeExceptionally(new IllegalStateException("Authenticated player was not attached"));
+                                    }
+                                } else if (message.startsWith("{\"type\":\"world_bootstrap\"")) {
+                                    if (!authenticated
+                                            || !message.contains("\"protocol\":1")
+                                            || !message.contains("\"dimension\":\"minecraft:overworld\"")
+                                            || !message.contains("\"sessionEpoch\":")
+                                            || !message.endsWith("\"play\":false}")) {
+                                        pong.completeExceptionally(new IllegalStateException("Invalid world bootstrap"));
+                                    }
+                                } else if (message.startsWith("{\"type\":\"world_window\"")) {
+                                    if (!authenticated
+                                            || !message.contains("\"protocol\":1")
+                                            || !message.contains("\"dimension\":\"minecraft:overworld\"")
+                                            || !message.contains("\"centerChunkX\":")
+                                            || !message.contains("\"centerChunkZ\":")
+                                            || !message.contains("\"radius\":1")
+                                            || !message.contains("\"revision\":1")
+                                            || !message.endsWith("\"play\":false}")) {
+                                        pong.completeExceptionally(new IllegalStateException("Invalid world window"));
                                     } else {
                                         socket.sendText("{\"type\":\"ping\",\"seq\":0}", true);
                                     }
