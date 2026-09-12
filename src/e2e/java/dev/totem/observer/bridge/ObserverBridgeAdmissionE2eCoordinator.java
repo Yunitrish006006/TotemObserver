@@ -75,6 +75,38 @@ public final class ObserverBridgeAdmissionE2eCoordinator implements ModInitializ
             }
 
             ObserverPlayerIdentity identity = authenticated.join();
+
+            // Once release starts, absence from PlayerList is the success condition rather than an
+            // admission failure. Handle this phase before the admission-presence checks below.
+            if (releaseRequested) {
+                if (server.getPlayerList().getPlayer(identity.uuid()) != null) {
+                    if (ticks > releaseTick + RELEASE_TIMEOUT_TICKS) {
+                        throw new IllegalStateException("Released account-v1 player remained in PlayerList");
+                    }
+                    return;
+                }
+
+                if (!releasedMarked) {
+                    marker("server-bridge-player-released.txt",
+                            "Server removed account-v1 player after WebSocket release.\n");
+                    releasedMarked = true;
+                    return;
+                }
+
+                if (!markerExists("target-bridge-player-removed.txt")) {
+                    if (ticks > releaseTick + RELEASE_TIMEOUT_TICKS) {
+                        throw new IllegalStateException("Target Java client retained released Observer player");
+                    }
+                    return;
+                }
+
+                marker("server-bridge-player-visibility-complete.txt",
+                        "Normal Java client observed account-v1 player add and removal lifecycle.\n");
+                complete = true;
+                shutdown();
+                return;
+            }
+
             ServerPlayer admitted = server.getPlayerList().getPlayer(identity.uuid());
             if (admitted == null) {
                 if (ticks > startedTick + ADMISSION_TIMEOUT_TICKS) {
@@ -100,42 +132,13 @@ public final class ObserverBridgeAdmissionE2eCoordinator implements ModInitializ
                 return;
             }
 
-            if (!releaseRequested) {
-                marker("server-bridge-player-release-requested.txt",
-                        "Closing account-v1 socket after Target proved player visibility.\n");
-                releaseRequested = true;
-                releaseTick = ticks;
-                stopHeartbeat();
-                WebSocket current = socket;
-                if (current != null) current.sendClose(WebSocket.NORMAL_CLOSURE, "e2e complete");
-                return;
-            }
-
-            if (server.getPlayerList().getPlayer(identity.uuid()) != null) {
-                if (ticks > releaseTick + RELEASE_TIMEOUT_TICKS) {
-                    throw new IllegalStateException("Released account-v1 player remained in PlayerList");
-                }
-                return;
-            }
-
-            if (!releasedMarked) {
-                marker("server-bridge-player-released.txt",
-                        "Server removed account-v1 player after WebSocket release.\n");
-                releasedMarked = true;
-                return;
-            }
-
-            if (!markerExists("target-bridge-player-removed.txt")) {
-                if (ticks > releaseTick + RELEASE_TIMEOUT_TICKS) {
-                    throw new IllegalStateException("Target Java client retained released Observer player");
-                }
-                return;
-            }
-
-            marker("server-bridge-player-visibility-complete.txt",
-                    "Normal Java client observed account-v1 player add and removal lifecycle.\n");
-            complete = true;
-            shutdown();
+            marker("server-bridge-player-release-requested.txt",
+                    "Closing account-v1 socket after Target proved player visibility.\n");
+            releaseRequested = true;
+            releaseTick = ticks;
+            stopHeartbeat();
+            WebSocket current = socket;
+            if (current != null) current.sendClose(WebSocket.NORMAL_CLOSURE, "e2e complete");
         } catch (CompletionException failure) {
             fail(failure.getCause() == null ? failure : failure.getCause());
         } catch (Throwable failure) {
