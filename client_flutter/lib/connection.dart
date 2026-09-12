@@ -145,7 +145,8 @@ class ObserverConnection extends ChangeNotifier {
               worldStateProtocol != 1) {
             throw const FormatException();
           }
-          if (worldStateProtocol == 1 && playerAdmission != true) {
+          if (worldStateProtocol == 1 &&
+              (playerAdmission != true || identityProtocol != 1)) {
             throw const FormatException();
           }
           _identityProtocol = identityProtocol == 1 ? 1 : 0;
