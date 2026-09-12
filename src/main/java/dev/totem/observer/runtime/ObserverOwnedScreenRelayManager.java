@@ -52,6 +52,7 @@ public final class ObserverOwnedScreenRelayManager {
             ServerPlayer observer = target.level().getServer().getPlayerList().getPlayer(observerId);
             if (observer != null && ObserverAccessPolicy.allows(observer, target)
                     && ServerPlayNetworking.canSend(observer, ObserverOwnedScreenPayloads.Relay.TYPE)) {
+                if (payload.open()) ObserverNexusTerrainRelay.enqueue(target,observer,snapshot);
                 ServerPlayNetworking.send(observer, relay);
             }
         }

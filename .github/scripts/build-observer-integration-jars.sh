@@ -4,7 +4,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 lockstep_root="${OBSERVER_LOCKSTEP_ROOT:-$repo_root/.lockstep}"
 core="$lockstep_root/TotemCore"
-core_jar="$core/build/libs/totem-core-0.7.18.jar"
+core_jar="$core/build/libs/totem-core-0.7.21.jar"
 wrapper="$core/gradlew"
 
 assert_checkout() {
@@ -43,17 +43,17 @@ assert_production_jar() {
         '.id == $mod_id and .version == $version' >/dev/null
 }
 
-assert_checkout TotemCore f87cd10fe8aefce77925b9e75dad237f17f38966 0.7.18
+assert_checkout TotemCore 077924318bf85fa5de7cda73ed0e96abe5df803b 0.7.21
 assert_checkout TotemExcavation f40b94fd5d9de8b47534343c76a95f62926d2b1b 0.1.13
 assert_checkout TotemRemnant 1d89395f93d8ea817947db4653919a11355eb548 0.2.21
 assert_checkout TotemAutomata cc4bdb022615faad73bc9e5c0ef6d52b9d0970e6 0.1.24
-assert_checkout TotemNexus e3f91a19790f9da85494b9ae1d5770dda12e0e43 0.3.17
+assert_checkout TotemNexus 66c2bd85a9b50a6d4f86241e9513967f854f70f8 0.3.23
 assert_checkout TotemVillagers 615f83c5c3534a40e6ae7a2a0713390512f8b64c 0.1.36
 assert_checkout TotemLocksmith 9e8e25d44887a33839dc2a3b92a424ca4b931e00 0.1.10
 
 chmod +x "$wrapper"
 "$wrapper" -p "$core" jar --no-daemon --stacktrace
-assert_production_jar "$core_jar" totem-core 0.7.18
+assert_production_jar "$core_jar" totem-core 0.7.21
 
 "$wrapper" -p "$lockstep_root/TotemExcavation" \
   -PtotemCoreJar="$core_jar" jar --no-daemon --stacktrace
@@ -76,8 +76,8 @@ assert_production_jar \
 "$wrapper" -p "$lockstep_root/TotemNexus" \
   -PtotemCoreJar="$core_jar" jar --no-daemon --stacktrace
 assert_production_jar \
-  "$lockstep_root/TotemNexus/build/libs/totem-nexus-0.3.17.jar" \
-  totem-nexus 0.3.17
+  "$lockstep_root/TotemNexus/build/libs/totem-nexus-0.3.23.jar" \
+  totem-nexus 0.3.23
 
 "$wrapper" -p "$lockstep_root/TotemVillagers" \
   -PtotemCoreJar="$core_jar" -PtotemRemnantJar="$remnant_jar" \

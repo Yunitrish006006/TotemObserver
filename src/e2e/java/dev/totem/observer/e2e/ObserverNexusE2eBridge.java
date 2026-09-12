@@ -133,7 +133,7 @@ public final class ObserverNexusE2eBridge implements ClientModInitializer {
         }
         if (recoverySaved && !recoveryClosed
                 && !dev.totem.observer.client.ObserverOwnedScreenCoordinator.isActive(
-                        "nexus", "recovery_compass", 3)
+                        "nexus", "recovery_compass", ObserverOwnedE2eSnapshots.protocol("nexus"))
                 && !dev.totem.observer.client.ObserverOwnedScreenCoordinator.hasRemoteCursor()
                 && minecraft.gui.screen() == null) {
             recoveryClosed = true;
@@ -151,11 +151,24 @@ public final class ObserverNexusE2eBridge implements ClientModInitializer {
                     || payload.interfaceType() != dev.totem.nexus.space.TeleportInterfaceType.FILLED_MAP
                     || payload.mapId() != ObserverOwnedE2eSnapshots.NEXUS_MAP_ID
                     || !ObserverOwnedE2eSnapshots.NEXUS_TARGET_ID.equals(observerSelection(minecraft.gui.screen()))
-                    || observerMapView(minecraft.gui.screen())[0] != 2
+                    || observerMapView(minecraft.gui.screen())[0] != 4
                     || observerMapView(minecraft.gui.screen())[1] != 0
                     || observerMapView(minecraft.gui.screen())[2] != -24) {
                 fail("Nexus map production Screen did not apply the later snapshot");
                 return;
+            }
+            if (ObserverOwnedE2eSnapshots.protocol("nexus") >= 5) {
+                var terrain = minecraft.level.getMapData(new net.minecraft.world.level.saveddata.maps.MapId(ObserverOwnedE2eSnapshots.NEXUS_MAP_ID));
+                if (terrain == null || terrain.centerX != 10 || terrain.centerZ != 10 || terrain.scale != 2
+                        || terrain.colors[64+64*128] == 0) return; // Wait for the bounded vanilla terrain queue.
+                try {
+                    var ids=(java.util.List<?>)Class.forName("dev.totem.nexus.client.NexusMapDetailClientState")
+                            .getMethod("ancestorMapIds",int.class).invoke(null,ObserverOwnedE2eSnapshots.NEXUS_MAP_ID);
+                    if(ids.isEmpty()) return;
+                    var detail=minecraft.level.getMapData(new net.minecraft.world.level.saveddata.maps.MapId((Integer)ids.getFirst()));
+                    if(detail==null || detail.colors[0]==0) return;
+                } catch(ReflectiveOperationException error) { fail("Owner terrain metadata unavailable: "+error); return; }
+                ObserverE2eCommon.marker("observer-native-nexus-terrain-ok.txt", "Authoritative base and sparse terrain arrived through the session-authorized vanilla packet queue.\n");
             }
             ensureNoGenericFallback("map");
             mapSeen = true;
@@ -227,7 +240,7 @@ public final class ObserverNexusE2eBridge implements ClientModInitializer {
 
         if (registrationSaved && !observerClosed
                 && !dev.totem.observer.client.ObserverOwnedScreenCoordinator.isActive(
-                "nexus", "registration", 3)
+                "nexus", "registration", ObserverOwnedE2eSnapshots.protocol("nexus"))
                 && minecraft.gui.screen() == null) {
             observerClosed = true;
             ObserverE2eCommon.marker("observer-native-nexus-closed.txt",
@@ -343,7 +356,7 @@ public final class ObserverNexusE2eBridge implements ClientModInitializer {
     }
 
     private static RenderBarrier observeVariant(String variant, RenderBarrier current) {
-        if (!dev.totem.observer.client.ObserverOwnedScreenCoordinator.isActive("nexus", variant, 3)) {
+        if (!dev.totem.observer.client.ObserverOwnedScreenCoordinator.isActive("nexus", variant, ObserverOwnedE2eSnapshots.protocol("nexus"))) {
             return current;
         }
         long sequence = ObserverE2eSequenceEvidence.accepted(ObserverNativeScreenPayloads.FAMILY_NEXUS);

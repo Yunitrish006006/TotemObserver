@@ -13,7 +13,7 @@ public final class ObserverOwnedScreenProtocols {
             "locksmith_management", 1,
             "villagers_woodcutter", 1);
     private static final Map<String, Set<Integer>> COMPATIBLE = Map.of(
-            "nexus", Set.of(3, 4));
+            "nexus", Set.of(3, 4, 5));
 
     private ObserverOwnedScreenProtocols() { }
 

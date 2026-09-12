@@ -1,7 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
-core_version="$(sed -n 's/^mod_version=//p' .lockstep/TotemCore/gradle.properties)"
-core_jar="${GITHUB_WORKSPACE}/.lockstep/TotemCore/build/libs/totem-core-${core_version}.jar"
+if [[ -z "${TOTEM_CORE_JAR:-}" ]]; then
+  core_version="$(sed -n 's/^mod_version=//p' .lockstep/TotemCore/gradle.properties)"
+  TOTEM_CORE_JAR="${GITHUB_WORKSPACE}/.lockstep/TotemCore/build/libs/totem-core-${core_version}.jar"
+fi
+integration_args=(
+  "-PtotemCoreJar=$TOTEM_CORE_JAR"
+  "-PtotemRemnantJar=${TOTEM_REMNANT_JAR:-${GITHUB_WORKSPACE}/.lockstep/TotemRemnant/build/libs/totem-remnant-0.2.21.jar}"
+  "-PtotemAutomataJar=${TOTEM_AUTOMATA_JAR:-${GITHUB_WORKSPACE}/.lockstep/TotemAutomata/build/libs/totem-automata-0.1.24.jar}"
+  "-PtotemNexusJar=${TOTEM_NEXUS_JAR:-${GITHUB_WORKSPACE}/.lockstep/TotemNexus/build/libs/totem-nexus-0.3.23.jar}"
+  "-PtotemVillagersJar=${TOTEM_VILLAGERS_JAR:-${GITHUB_WORKSPACE}/.lockstep/TotemVillagers/build/libs/totem-villagers-0.1.36.jar}"
+  "-PtotemLocksmithJar=${TOTEM_LOCKSMITH_JAR:-${GITHUB_WORKSPACE}/.lockstep/TotemLocksmith/build/libs/totem-locksmith-0.1.10.jar}"
+)
+if [[ -n "${TOTEM_GRADLE_INIT_SCRIPT:-}" ]]; then
+  integration_args+=(--init-script "$TOTEM_GRADLE_INIT_SCRIPT")
+fi
 results="${GITHUB_WORKSPACE}/build/e2e/results"
 mkdir -p build/e2e/server build/e2e/target build/e2e/observer "$results"
 rm -f "$results"/*
@@ -28,12 +41,7 @@ mkdir -p "$launch_dir"
 find "$launch_dir" -maxdepth 1 -type f \
   \( -name 'launch.cfg' -o -name 'runE2eTarget.args' -o -name 'runE2eObserver.args' \) \
   -delete
-./gradlew -PtotemCoreJar="$core_jar" \
-  -PtotemRemnantJar="${GITHUB_WORKSPACE}/.lockstep/TotemRemnant/build/libs/totem-remnant-0.2.21.jar" \
-  -PtotemAutomataJar="${GITHUB_WORKSPACE}/.lockstep/TotemAutomata/build/libs/totem-automata-0.1.24.jar" \
-  -PtotemNexusJar="${GITHUB_WORKSPACE}/.lockstep/TotemNexus/build/libs/totem-nexus-0.3.17.jar" \
-  -PtotemVillagersJar="${GITHUB_WORKSPACE}/.lockstep/TotemVillagers/build/libs/totem-villagers-0.1.36.jar" \
-  -PtotemLocksmithJar="${GITHUB_WORKSPACE}/.lockstep/TotemLocksmith/build/libs/totem-locksmith-0.1.10.jar" \
+./gradlew "${integration_args[@]}" \
   -Pe2eLaunchInputsDir="$launch_dir" \
   --project-cache-dir "$client_launch_cache" \
   prepareE2eClientLaunchInputs \
@@ -86,12 +94,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-./gradlew -PtotemCoreJar="$core_jar" \
-  -PtotemRemnantJar="${GITHUB_WORKSPACE}/.lockstep/TotemRemnant/build/libs/totem-remnant-0.2.21.jar" \
-  -PtotemAutomataJar="${GITHUB_WORKSPACE}/.lockstep/TotemAutomata/build/libs/totem-automata-0.1.24.jar" \
-  -PtotemNexusJar="${GITHUB_WORKSPACE}/.lockstep/TotemNexus/build/libs/totem-nexus-0.3.17.jar" \
-  -PtotemVillagersJar="${GITHUB_WORKSPACE}/.lockstep/TotemVillagers/build/libs/totem-villagers-0.1.36.jar" \
-  -PtotemLocksmithJar="${GITHUB_WORKSPACE}/.lockstep/TotemLocksmith/build/libs/totem-locksmith-0.1.10.jar" \
+./gradlew "${integration_args[@]}" \
   --project-cache-dir "${GITHUB_WORKSPACE}/build/e2e/gradle-server" \
   runE2eServer --no-daemon --stacktrace > build/e2e/server.log 2>&1 &
 server_pid=$!

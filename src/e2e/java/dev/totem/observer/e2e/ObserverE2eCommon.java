@@ -130,6 +130,7 @@ public final class ObserverE2eCommon implements ModInitializer {
                     throw new AssertionError("Production start did not register observer -> target session");
                 }
 
+                ObserverNexusTerrainFixture.install(target);
                 started = true;
                 marker("server-session-started.txt",
                         "observer=" + observerId + "\ntarget=" + targetId

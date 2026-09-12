@@ -10,7 +10,7 @@ TotemObserver owns the cross-cutting runtime behind `/observeui`: server-authori
 - Java 25
 - Fabric Loader / Fabric API
 - TotemCore `>=0.7.18 <0.8.0`
-- module version `0.1.1`
+- module version `0.1.2`
 
 ## Ownership model
 
@@ -75,7 +75,7 @@ Runtime extraction, VanillaTweaks cleanup, Observer GameTests, cross-module inte
 - `Observer Runtime Validation`: client GameTests, owner-present integration and built-artifact production runtime validation.
 - `Observer 3-JVM E2E`: a dedicated server plus separate target and observer clients.
 
-The current source version is 0.1.1. Successful validation does not establish a published release; the Modrinth workflow now supports authenticated dry runs and explicit uploads. Any future change from the compatibility packet namespace to `totem-observer:*` remains a separate protocol migration.
+The current source version is 0.1.2. Successful validation does not establish a published release; the Modrinth workflow now supports authenticated dry runs and explicit uploads. Any future change from the compatibility packet namespace to `totem-observer:*` remains a separate protocol migration.
 
 Current-head CI, local build and independent review evidence are recorded in [VALIDATION.md](VALIDATION.md).
 
@@ -102,3 +102,7 @@ Prepare `.github/staging/modrinth-changelog-<version>.md` and update `gradle.pro
 Version **0.1.1** was uploaded and verified on 2026-09-11. The project was submitted to Modrinth moderation and read back as **processing**. See `.github/staging/modrinth-published-0.1.1.json` and `.github/staging/modrinth-review-status-0.1.1.json`.
 
 `Submit Modrinth review` is a separate manual workflow. Its default mode only inspects project metadata; submission mode verifies the existing version, fills missing draft metadata from the reviewed project description, and records the fresh moderation state.
+
+### Nexus map detail compatibility
+
+Observer 0.1.2 supports Nexus provider v5 and session-authorized vanilla terrain packets from TotemNexus 0.3.23. Use Core 0.7.21 or newer with that Nexus version. The owning Nexus Screen renders the detail at its real world position; observation remains read-only and framebuffer-free.
