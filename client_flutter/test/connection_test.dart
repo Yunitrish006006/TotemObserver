@@ -29,6 +29,7 @@ const hello = {
   'authentication': true,
   'registration': true,
   'playerIdentityProtocol': 1,
+  'playerAdmission': true,
   'play': false,
 };
 const authenticated = {
@@ -38,11 +39,12 @@ const authenticated = {
   'playerUuid': '12345678-1234-1234-1234-123456789abc',
   'playerName': 'obs_123456781234',
   'sessionEpoch': 42,
+  'playerAttached': true,
   'play': false,
 };
 
 void main() {
-  testWidgets('login clears password, accepts identity session and logs out', (
+  testWidgets('login clears password, accepts admitted player and logs out', (
     tester,
   ) async {
     final socket = FakeTransport();
@@ -66,7 +68,9 @@ void main() {
       find.text('角色 UUID：12345678-1234-1234-1234-123456789abc'),
       findsOneWidget,
     );
+    expect(find.text('角色狀態：已接入 Minecraft 玩家清單'), findsOneWidget);
     expect(connection.sessionEpoch, 42);
+    expect(connection.playerAttached, isTrue);
     expect(find.text('已收到 1 次連線回應'), findsOneWidget);
     await tester.tap(find.widgetWithText(ElevatedButton, '登出'));
     await tester.pump();
@@ -74,6 +78,7 @@ void main() {
     expect(socket.sent.last, '{"type":"logout"}');
     expect(connection.account, isEmpty);
     expect(connection.playerUuid, isEmpty);
+    expect(connection.playerAttached, isFalse);
     connection.dispose();
   });
 
@@ -132,6 +137,23 @@ void main() {
     );
     socket.receive(hello);
     socket.receive({...authenticated, 'playerUuid': 'client-chosen'});
+    expect(connection.phase, ConnectionPhase.offline);
+    expect(connection.status, '伺服器回應不相容，請重新連線');
+    connection.dispose();
+  });
+
+  testWidgets('rejects missing player admission after advertised capability', (
+    tester,
+  ) async {
+    final socket = FakeTransport();
+    final connection = ObserverConnection(open: (_) => socket);
+    await connection.authenticate(
+      'ws://127.0.0.1:25580/observer/bridge',
+      'alice',
+      'local-test-password',
+    );
+    socket.receive(hello);
+    socket.receive({...authenticated, 'playerAttached': false});
     expect(connection.phase, ConnectionPhase.offline);
     expect(connection.status, '伺服器回應不相容，請重新連線');
     connection.dispose();
