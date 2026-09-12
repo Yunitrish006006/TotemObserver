@@ -47,7 +47,7 @@ assert_checkout TotemCore 077924318bf85fa5de7cda73ed0e96abe5df803b 0.7.21
 assert_checkout TotemExcavation f40b94fd5d9de8b47534343c76a95f62926d2b1b 0.1.13
 assert_checkout TotemRemnant 1d89395f93d8ea817947db4653919a11355eb548 0.2.21
 assert_checkout TotemAutomata cc4bdb022615faad73bc9e5c0ef6d52b9d0970e6 0.1.24
-assert_checkout TotemNexus 66c2bd85a9b50a6d4f86241e9513967f854f70f8 0.3.23
+assert_checkout TotemNexus 6542bc21b68ecb3438085c400eaa9e16ce34ba63 0.3.23
 assert_checkout TotemVillagers 615f83c5c3534a40e6ae7a2a0713390512f8b64c 0.1.36
 assert_checkout TotemLocksmith 9e8e25d44887a33839dc2a3b92a424ca4b931e00 0.1.10
 
