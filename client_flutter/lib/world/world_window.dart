@@ -14,11 +14,16 @@ class ChunkKey {
     if (other is! ChunkKey) {
       return false;
     }
-    return other.dimension == dimension && other.x == x && other.z == z;
+    final sameDimension = other.dimension == dimension;
+    final sameX = other.x == x;
+    final sameZ = other.z == z;
+    return sameDimension && sameX && sameZ;
   }
 
   @override
-  int get hashCode => Object.hash(dimension, x, z);
+  int get hashCode {
+    return Object.hash(dimension, x, z);
+  }
 }
 
 class WorldWindow {
@@ -40,7 +45,9 @@ class WorldWindow {
   final int radius;
   final int revision;
 
-  static final RegExp _dimension = RegExp(r'^[a-z0-9_.-]+:[a-z0-9/._-]+$');
+  static const String _dimensionPattern =
+      r'^[a-z0-9_.-]+:[a-z0-9/._-]+$';
+  static final RegExp _dimension = RegExp(_dimensionPattern);
   static const int _minChunkCoordinate = -2147483648;
   static const int _maxChunkCoordinate = 2147483647;
   static const int _maxRadius = 8;
@@ -51,8 +58,12 @@ class WorldWindow {
   }
 
   Iterable<ChunkKey> get chunks sync* {
-    for (var z = centerChunkZ - radius; z <= centerChunkZ + radius; z++) {
-      for (var x = centerChunkX - radius; x <= centerChunkX + radius; x++) {
+    final minX = centerChunkX - radius;
+    final maxX = centerChunkX + radius;
+    final minZ = centerChunkZ - radius;
+    final maxZ = centerChunkZ + radius;
+    for (var z = minZ; z <= maxZ; z++) {
+      for (var x = minX; x <= maxX; x++) {
         yield ChunkKey(dimension: dimension, x: x, z: z);
       }
     }
@@ -64,7 +75,9 @@ class WorldWindow {
     }
     final dx = (key.x - centerChunkX).abs();
     final dz = (key.z - centerChunkZ).abs();
-    return dx <= radius && dz <= radius;
+    final insideX = dx <= radius;
+    final insideZ = dz <= radius;
+    return insideX && insideZ;
   }
 
   factory WorldWindow.fromMessage(Map<String, dynamic> message) {
@@ -112,7 +125,10 @@ class WorldWindow {
     if (radius is! int) {
       throw const FormatException();
     }
-    if (radius < 0 || radius > _maxRadius) {
+    if (radius < 0) {
+      throw const FormatException();
+    }
+    if (radius > _maxRadius) {
       throw const FormatException();
     }
     if (revision is! int) {
@@ -134,6 +150,8 @@ class WorldWindow {
   }
 
   static bool _validChunkCoordinate(int value) {
-    return value >= _minChunkCoordinate && value <= _maxChunkCoordinate;
+    final aboveMinimum = value >= _minChunkCoordinate;
+    final belowMaximum = value <= _maxChunkCoordinate;
+    return aboveMinimum && belowMaximum;
   }
 }
