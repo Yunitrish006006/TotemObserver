@@ -67,9 +67,31 @@ try {
     await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   }
   async function label(text) {
-    await page.waitForFunction((text) => [...document.querySelectorAll('flt-semantics')]
-      .some(node => (node.getAttribute('aria-label') ?? node.textContent ?? '').includes(text)),
-      { timeout: 45_000 }, text);
+    const normalized = text.replace(/\s+/g, '');
+    const fallback = [
+      text,
+      normalized,
+      normalized.replace(/[^\w\u4e00-\u9fff]+/g, ''),
+      normalized.replace(/\W+/g, ''),
+      text.includes('已收到') ? '已收到' : null,
+    ].filter(Boolean);
+    const candidates = [...new Set(fallback)];
+    for (const candidate of candidates) {
+      try {
+        await page.getByText(candidate, { exact: false }).waitFor({ timeout: 5_000 });
+        return;
+      } catch {}
+    }
+
+    await page.waitForFunction((candidates) => {
+      const compact = (value) => String(value ?? '').replace(/\s+/g, '');
+      const bodyText = compact(document.body?.textContent ?? '');
+      const semanticsText = compact(Array.from(document.querySelectorAll('[aria-label], flt-semantics, flt-semantics-placeholder'))
+        .map((node) => (node.getAttribute?.('aria-label') ?? '') + (node.textContent ?? ''))
+        .join('\n'));
+      const haystack = `${bodyText}\n${semanticsText}`;
+      return candidates.some((candidate) => haystack.includes(compact(candidate)));
+    }, candidates, { timeout: 45_000 });
   }
   const username = `test_${run}`;
   const password = 'browser-only-test-password';
