@@ -192,6 +192,19 @@ class WorldVisibleViewController extends ChangeNotifier {
     }
 
     _plan = next;
+    connection.retainWorldSections(
+      next.targets
+          .map(
+            (target) => WorldSectionKey(
+              subscriptionId: next.subscriptionId,
+              revision: next.revision,
+              chunkX: target.chunkX,
+              chunkZ: target.chunkZ,
+              sectionY: target.sectionY,
+            ),
+          )
+          .toSet(),
+    );
     scheduler.clear();
     for (final target in next.targets) {
       scheduler.enqueue(target);

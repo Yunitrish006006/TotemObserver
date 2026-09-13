@@ -12,6 +12,8 @@ class HydrationConnection extends DebugSliceTestConnection {
       names[i] = 'minecraft:test_$i';
     }
   }
+  @override
+  void requestWorldSection(int chunkX, int chunkZ, int sectionY) {}
   final requested = <int>[];
   Set<int> retained = {};
   bool pending = false;

@@ -29,7 +29,7 @@ try {
   page = await browser.newPage({viewport:{width:1100,height:1100}});
   const errors = []; page.on('pageerror', () => errors.push('runtime error'));
   const movements = []; let tick = 0, sectionRequests = 0, firstActiveSectionCount = null;
-  let terrainSent = false;
+  let terrainSent = false, worldZ = 8, revision = 0;
   const hash = '0'.repeat(64), dimension = 'minecraft:overworld';
   await page.routeWebSocket('**/observer/bridge', socket => {
     const send = value => socket.send(JSON.stringify(value));
@@ -45,8 +45,8 @@ try {
           playerUuid:'12345678-1234-1234-1234-123456789abc',playerName:'obs_123456781234',sessionEpoch:42,playerAttached:true,play:false});
       } else if (message.type === 'ping') send({type:'pong',seq:message.seq});
       else if (message.type === 'world_state') send({...base,type:'world_state',dimension,x:8,y:64,z:8,yaw:0,pitch:25});
-      else if (message.type === 'world_bootstrap') send({...base,type:'world_bootstrap',subscriptionId:1,revision:1,
-        dimension,minY:-64,height:384,centerChunkX:0,centerChunkZ:0,radius:2});
+      else if (message.type === 'world_bootstrap') send({...base,type:'world_bootstrap',subscriptionId:1,revision:++revision,
+        dimension,minY:-64,height:384,centerChunkX:0,centerChunkZ:Math.floor(worldZ/16),radius:2});
       else if (message.type === 'world_registry') send({...base,type:'world_registry',fingerprint:hash,offset:0,total:8,
         states:['minecraft:air','minecraft:stone','minecraft:stone','minecraft:stone','minecraft:stone','minecraft:stone','minecraft:stone','minecraft:stone']});
       else if (message.type === 'world_section') {
@@ -55,16 +55,17 @@ try {
         for (let part=0;part<4;part++) {
           const ids = Buffer.alloc(1024);
           if (message.sectionY === 3 && part === 3) ids.fill(7,768);
-          send({...base,type:'world_section',subscriptionId:1,revision:1,registryFingerprint:hash,dimension,
+          send({...base,type:'world_section',subscriptionId:1,revision:message.revision,registryFingerprint:hash,dimension,
             chunkX:message.chunkX,chunkZ:message.chunkZ,sectionY:message.sectionY,part,parts:4,stateCount:1024,data:ids.toString('base64')});
         }
       } else if (message.type === 'world_movement') {
         assert.equal(Object.hasOwn(message,'x'),false); assert.equal(Object.hasOwn(message,'z'),false);
         if (message.forward && firstActiveSectionCount === null) firstActiveSectionCount = sectionRequests;
-        movements.push({strafe:message.strafe,forward:message.forward,jump:message.jump,yaw:message.yaw,pitch:message.pitch});
+        movements.push({revision:message.revision,strafe:message.strafe,forward:message.forward,jump:message.jump,yaw:message.yaw,pitch:message.pitch});
         if (movements.length > 300) throw new Error('Unbounded movement fixture');
-        send({...base,type:'world_movement',subscriptionId:1,revision:1,serverTick:++tick,
-          applied:true,onGround:true,dimension,x:8,y:64,z:8,yaw:message.yaw/100,pitch:message.pitch/100});
+        if (message.forward === 1) worldZ = 16.1; // Server fixture chooses the crossing, never browser XYZ.
+        send({...base,type:'world_movement',subscriptionId:1,revision:message.revision,serverTick:++tick,
+          applied:true,onGround:true,dimension,x:8,y:64,z:worldZ,yaw:message.yaw/100,pitch:message.pitch/100});
       } else if (message.type === 'logout') socket.close();
       else throw new Error('Unexpected fixture operation');
     });
@@ -105,6 +106,9 @@ try {
     await page.screenshot({path:resolve(evidence,'first-person-input-failure.png')});
   }
   assert.ok(movements.some(m => m.forward===1 && m.jump===1 && m.yaw!==0),'Captured DOM input must reach movement intent');
+  const windowDeadline = Date.now()+5000;
+  while (!movements.some(m => m.revision === 2 && m.forward === 1) && Date.now()<windowDeadline) await page.waitForTimeout(50);
+  assert.ok(movements.some(m => m.revision === 2 && m.forward === 1),'Held input must survive authoritative chunk-window replacement');
   await page.keyboard.up('w'); await page.keyboard.up('Space');
   await page.keyboard.press('Escape');
   await page.waitForFunction(() => document.pointerLockElement === null);
@@ -121,7 +125,7 @@ try {
   const count = movements.length; await page.waitForTimeout(300);
   assert.equal(movements.length,count); assert.equal(errors.length,0);
   await writeFile(resolve(evidence,'movement-input-result.json'),JSON.stringify({passed:true,
-    fixture:'bounded protocol fixture; no Minecraft physics',checks:['actual-pointer-lock','WASD-jump','mouse-delta','movement-during-streaming','escape','disconnect'],playable:false},null,2));
+    fixture:'bounded protocol fixture; no Minecraft physics',checks:['actual-pointer-lock','WASD-jump','mouse-delta','movement-during-streaming','chunk-window-revision','escape','disconnect'],playable:false},null,2));
   console.log('Browser pointer-lock input fixture passed (not a Minecraft playable smoke)');
 } catch(error) {
   console.log(JSON.stringify({recentOperations:operationTypes}));

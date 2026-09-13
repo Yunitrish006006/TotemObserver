@@ -156,6 +156,8 @@ void main() {
       );
       socket.receive(hello);
       socket.receive(authenticated);
+      socket.receive(worldBootstrap);
+      socket.receive(worldState);
       await tester.pump(const Duration(seconds: 13));
       expect(connection.phase, ConnectionPhase.offline);
       expect(connection.status, '伺服器未回應，連線已結束');
