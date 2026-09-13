@@ -183,8 +183,7 @@ class WorldSectionScheduler extends ChangeNotifier {
     }
   }
 
-  static int _sectionYForBlockY(int y) =>
-      y >= 0 ? y ~/ 16 : -((-y + 15) ~/ 16);
+  static int _sectionYForBlockY(int y) => y >= 0 ? y ~/ 16 : -((-y + 15) ~/ 16);
 
   void _notify() {
     if (!_disposed) notifyListeners();
