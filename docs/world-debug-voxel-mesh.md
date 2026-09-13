@@ -6,7 +6,7 @@ This slice turns an authenticated `WorldSectionSnapshot` into a conservative set
 
 A face is emitted only when all of the following are known:
 
-1. the source section belongs to the current subscription/revision;
+1. the source snapshot is supplied from the current subscription/revision;
 2. the source raw state ID resolves to a canonical registry entry;
 3. the source entry is not exact vanilla air;
 4. the neighboring cell is available from the same revision, including across section/chunk boundaries; and
@@ -28,6 +28,12 @@ Each emitted diagnostic face carries:
 - the visual render hint from `WorldBlockStateDescriptor`.
 
 The render hint remains heuristic except for exact air/fluid facts. It is not collision or gameplay truth.
+
+## Diagnostics and cost
+
+The result separately counts unresolved source cells, faces suppressed because a neighbor state is unknown, and faces suppressed because the required neighboring section is missing or stale. These are face counts, not distinct section counts.
+
+Block-state descriptors are cached by raw state ID for the duration of one section build so repeated palette states are parsed once per mesh operation.
 
 ## Non-goals
 
