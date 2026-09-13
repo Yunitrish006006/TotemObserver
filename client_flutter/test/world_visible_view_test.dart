@@ -115,10 +115,7 @@ void main() {
     expect(plan!.anchorSectionY, -4);
     expect(plan.targets, hasLength(34));
     expect(plan.targets.where((target) => target.sectionY == -5), isEmpty);
-    expect(
-      plan.targets.where((target) => target.sectionY == -3),
-      hasLength(9),
-    );
+    expect(plan.targets.where((target) => target.sectionY == -3), hasLength(9));
 
     connection.dispose();
   });

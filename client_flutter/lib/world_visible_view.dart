@@ -159,12 +159,8 @@ class WorldVisibleViewController extends ChangeNotifier {
       connection.worldSection(target.chunkX, target.chunkZ, target.sectionY) !=
       null;
 
-  bool _unavailable(WorldSectionCoordinate target) =>
-      connection.worldSectionUnavailable(
-        target.chunkX,
-        target.chunkZ,
-        target.sectionY,
-      );
+  bool _unavailable(WorldSectionCoordinate target) => connection
+      .worldSectionUnavailable(target.chunkX, target.chunkZ, target.sectionY);
 
   bool _sameContext(VisibleWorldPlan a, VisibleWorldPlan b) =>
       a.subscriptionId == b.subscriptionId &&

@@ -198,9 +198,9 @@ class _ConnectionPageState extends State<ConnectionPage> {
                         connection.hasWorldState
                             ? visibleWorld.hasPlan
                                   ? visibleWorld.resolvedCount ==
-                                        visibleWorld.targetCount
-                                      ? '已建立受限的伺服器權威世界快取；畫面與遊戲操作仍未啟用。'
-                                      : '正在建立受限的伺服器權威世界快取；畫面與遊戲操作仍未啟用。'
+                                            visibleWorld.targetCount
+                                        ? '已建立受限的伺服器權威世界快取；畫面與遊戲操作仍未啟用。'
+                                        : '正在建立受限的伺服器權威世界快取；畫面與遊戲操作仍未啟用。'
                                   : '已取得伺服器權威角色快照；區塊同步、畫面與遊戲操作仍未啟用。'
                             : connection.playerAttached
                             ? '角色已存在於伺服器世界並使用原版 playerdata；區塊畫面與遊戲操作仍在開發中。'
