@@ -111,6 +111,11 @@ class ObserverConnection extends ChangeNotifier {
   StreamSubscription<dynamic>? _subscription;
   Timer? _deadline, _heartbeat, _responseDeadline;
   Timer? _movementDeadline, _movementCooldown, _registryDeadline;
+  Timer? _blockUseDeadline, _blockUseCooldown;
+  int _worldBlockUseProtocol = 0, _pendingBlockUseSequence = -1;
+  bool get blockUsePending => _pendingBlockUseSequence >= 0;
+  bool get canUseBlock => canMove && _worldBlockUseProtocol == 1;
+  String? lastBlockUseOutcome;
   Timer? _sectionCooldown,
       _registryCooldown,
       _sectionDeadline,
@@ -119,6 +124,7 @@ class ObserverConnection extends ChangeNotifier {
   bool get worldWindowRefreshing =>
       _worldWindowRefreshNeeded || _pendingWorldBootstrapSequence >= 0;
   bool get canSendWorldSectionNow =>
+      !blockUsePending &&
       !(_sectionCooldown?.isActive ?? false) &&
       !worldWindowRefreshing &&
       _pendingWorldSection == null;
@@ -375,6 +381,20 @@ class ObserverConnection extends ChangeNotifier {
                   worldStateProtocol != 1))
             throw const FormatException();
           _worldMovementProtocol = worldMovementProtocol == 1 ? 1 : 0;
+          final blockUseProtocol = message['worldBlockUseProtocol'];
+          if (blockUseProtocol != null &&
+              (blockUseProtocol is! int ||
+                  (blockUseProtocol != 0 && blockUseProtocol != 1))) {
+            throw const FormatException();
+          }
+          if (blockUseProtocol == 1 &&
+              (playerAdmission != true ||
+                  identityProtocol != 1 ||
+                  worldMovementProtocol != 1 ||
+                  worldBootstrapProtocol != 1)) {
+            throw const FormatException();
+          }
+          _worldBlockUseProtocol = blockUseProtocol == 1 ? 1 : 0;
           final worldSectionProtocol = message['worldSectionProtocol'];
           if (worldSectionProtocol != null &&
               worldSectionProtocol != 0 &&
@@ -451,6 +471,58 @@ class ObserverConnection extends ChangeNotifier {
           }
           if (_worldStateProtocol == 1 && playerAttached) _requestWorldState();
           ping();
+        case 'world_block_use':
+          const keys = {
+            'type',
+            'protocol',
+            'seq',
+            'sessionEpoch',
+            'subscriptionId',
+            'revision',
+            'dimension',
+            'outcome',
+            'refreshRequired',
+          };
+          final outcome = message['outcome'];
+          if (!canUseBlock ||
+              !blockUsePending ||
+              message.length != keys.length ||
+              !message.keys.every(keys.contains) ||
+              ![
+                'protocol',
+                'seq',
+                'sessionEpoch',
+                'subscriptionId',
+                'revision',
+              ].every((key) => message[key] is int) ||
+              message['protocol'] != 1 ||
+              message['seq'] != _pendingBlockUseSequence ||
+              message['sessionEpoch'] != sessionEpoch ||
+              message['subscriptionId'] != bootstrapSubscriptionId ||
+              message['revision'] != bootstrapRevision ||
+              message['dimension'] != bootstrapDimension ||
+              !{
+                'applied',
+                'no_target',
+                'unsupported',
+                'denied',
+              }.contains(outcome) ||
+              message['refreshRequired'] is! bool ||
+              message['refreshRequired'] != (outcome == 'applied')) {
+            throw const FormatException();
+          }
+          _blockUseDeadline?.cancel();
+          _pendingBlockUseSequence = -1;
+          lastBlockUseOutcome = outcome as String;
+          if (outcome == 'applied') {
+            _worldGeometryRevision++;
+            _worldSections.clear();
+            _unavailableWorldSections.clear();
+            _wantedWorldSections = null;
+            _worldWindowRefreshNeeded = true;
+            _tryRefreshWorldWindow();
+          }
+          _notify();
         case 'world_movement':
           const keys = {
             'type',
@@ -828,6 +900,45 @@ class ObserverConnection extends ChangeNotifier {
     }
   }
 
+  /// Sends an immediate use intent only after previous world work has drained.
+  /// Callers own input/focus; false means no action was queued or sent.
+  bool sendBlockUse() {
+    if (!canUseBlock ||
+        blockUsePending ||
+        movementPending ||
+        worldWindowRefreshing ||
+        _pendingWorldSection != null ||
+        (_blockUseCooldown?.isActive ?? false) ||
+        !(_pacer?.canSendImmediately ?? false))
+      return false;
+    try {
+      final seq = _sequence++;
+      _pendingBlockUseSequence = seq;
+      lastBlockUseOutcome = null;
+      _blockUseCooldown = Timer(const Duration(milliseconds: 220), _notify);
+      _blockUseDeadline = Timer(
+        const Duration(seconds: 5),
+        () => _fail('互動回應逾時，連線已結束'),
+      );
+      _pacer!.send(
+        jsonEncode({
+          'type': 'world_block_use',
+          'protocol': 1,
+          'seq': seq,
+          'sessionEpoch': sessionEpoch,
+          'subscriptionId': bootstrapSubscriptionId,
+          'revision': bootstrapRevision,
+          'dimension': bootstrapDimension,
+        }),
+      );
+      _notify();
+      return true;
+    } catch (_) {
+      _fail('連線已中斷');
+      return false;
+    }
+  }
+
   /// Sends intent only. The response replaces authoritative state; no local XYZ prediction.
   bool sendMovement({
     required int strafe,
@@ -837,6 +948,7 @@ class ObserverConnection extends ChangeNotifier {
     required bool jump,
   }) {
     if (!canMove ||
+        blockUsePending ||
         _worldWindowRefreshNeeded ||
         !(_pacer?.canSendImmediately ?? false) ||
         movementPending ||
@@ -903,6 +1015,7 @@ class ObserverConnection extends ChangeNotifier {
         _worldBootstrapProtocol != 1 ||
         !playerAttached ||
         _pendingWorldBootstrapSequence >= 0 ||
+        blockUsePending ||
         movementPending ||
         _pendingWorldSection != null) {
       return;
@@ -1091,6 +1204,11 @@ class ObserverConnection extends ChangeNotifier {
     _generation++;
     _worldGeometryRevision++;
     _movementDeadline?.cancel();
+    _blockUseDeadline?.cancel();
+    _blockUseCooldown?.cancel();
+    _pendingBlockUseSequence = -1;
+    _worldBlockUseProtocol = 0;
+    lastBlockUseOutcome = null;
     _registryDeadline?.cancel();
     _sectionDeadline?.cancel();
     _bootstrapDeadline?.cancel();
