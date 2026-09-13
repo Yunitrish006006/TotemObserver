@@ -110,7 +110,7 @@ class ObserverConnection extends ChangeNotifier {
   OutboundFramePacer? _pacer;
   StreamSubscription<dynamic>? _subscription;
   Timer? _deadline, _heartbeat, _responseDeadline;
-  Timer? _movementDeadline, _movementCooldown;
+  Timer? _movementDeadline, _movementCooldown, _registryDeadline;
   int _worldMovementProtocol = 0, _pendingMovementSequence = -1;
   int _lastMovementServerTick = -1, _worldGeometryRevision = 0;
   int get worldGeometryRevision => _worldGeometryRevision;
@@ -171,6 +171,22 @@ class ObserverConnection extends ChangeNotifier {
       registryFingerprint.isNotEmpty && registryTotal > 0;
   bool get canRequestWorldSections =>
       _worldSectionProtocol == 1 && hasWorldBootstrap && hasWorldRegistry;
+  bool get worldRegistryPending => _pendingWorldRegistrySequence >= 0;
+  static const maxCachedBlockStates = 4096;
+  int get cachedBlockStateCount => _blockStateNames.length;
+
+  void retainBlockStatePages(Set<int> offsets) {
+    if (offsets.length > 256 || offsets.any((v) => v < 0 || v % 8 != 0)) {
+      throw ArgumentError('Bounded registry pages required');
+    }
+    final before = _blockStateNames.length;
+    _blockStateNames.removeWhere((id, _) => !offsets.contains((id ~/ 8) * 8));
+    if (_blockStateNames.length != before) {
+      _worldGeometryRevision++;
+      _notify();
+    }
+  }
+
   String? blockStateName(int rawId) => _blockStateNames[rawId];
 
   WorldSectionSnapshot? worldSection(int chunkX, int chunkZ, int sectionY) {
@@ -586,7 +602,8 @@ class ObserverConnection extends ChangeNotifier {
               states is! List ||
               states.isEmpty ||
               states.length > 8 ||
-              offset + states.length > total) {
+              offset + states.length > total ||
+              states.length != (total - offset < 8 ? total - offset : 8)) {
             throw const FormatException();
           }
           final statePattern = RegExp(
@@ -607,9 +624,15 @@ class ObserverConnection extends ChangeNotifier {
               total != registryTotal) {
             throw const FormatException();
           }
+          _registryDeadline?.cancel();
           _pendingWorldRegistrySequence = -1;
           _pendingWorldRegistryOffset = -1;
           _worldGeometryRevision++;
+          while (_blockStateNames.length + states.length >
+              maxCachedBlockStates) {
+            final oldestPage = (_blockStateNames.keys.first ~/ 8) * 8;
+            _blockStateNames.removeWhere((id, _) => id ~/ 8 == oldestPage ~/ 8);
+          }
           for (int i = 0; i < states.length; i++) {
             _blockStateNames[offset + i] = states[i] as String;
           }
@@ -837,6 +860,10 @@ class ObserverConnection extends ChangeNotifier {
       final seq = _sequence++;
       _pendingWorldRegistrySequence = seq;
       _pendingWorldRegistryOffset = offset;
+      _registryDeadline = Timer(
+        const Duration(seconds: 5),
+        () => _fail('方塊資料回應逾時，連線已結束'),
+      );
       _pacer?.send(
         jsonEncode({'type': 'world_registry', 'seq': seq, 'offset': offset}),
       );
@@ -980,6 +1007,7 @@ class ObserverConnection extends ChangeNotifier {
     _generation++;
     _worldGeometryRevision++;
     _movementDeadline?.cancel();
+    _registryDeadline?.cancel();
     _movementCooldown?.cancel();
     _pendingMovementSequence = -1;
     _lastMovementServerTick = -1;
