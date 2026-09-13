@@ -144,6 +144,7 @@ class ObserverConnection extends ChangeNotifier {
   int registryTotal = 0;
   final Map<int, String> _blockStateNames = {};
   final Map<WorldSectionKey, WorldSectionSnapshot> _worldSections = {};
+  final Set<WorldSectionKey> _unavailableWorldSections = {};
   int replies = 0;
 
   bool get hasWorldState => worldDimension.isNotEmpty;
@@ -164,6 +165,19 @@ class ObserverConnection extends ChangeNotifier {
       chunkZ: chunkZ,
       sectionY: sectionY,
     )];
+  }
+
+  bool worldSectionUnavailable(int chunkX, int chunkZ, int sectionY) {
+    if (!hasWorldBootstrap) return false;
+    return _unavailableWorldSections.contains(
+      WorldSectionKey(
+        subscriptionId: bootstrapSubscriptionId,
+        revision: bootstrapRevision,
+        chunkX: chunkX,
+        chunkZ: chunkZ,
+        sectionY: sectionY,
+      ),
+    );
   }
 
   Future<void> authenticate(
@@ -437,6 +451,7 @@ class ObserverConnection extends ChangeNotifier {
           _pendingWorldBootstrapSequence = -1;
           _pendingWorldSection = null;
           _worldSections.clear();
+          _unavailableWorldSections.clear();
           bootstrapSubscriptionId = subscriptionId;
           bootstrapRevision = revision;
           bootstrapDimension = dimension;
@@ -552,10 +567,50 @@ class ObserverConnection extends ChangeNotifier {
               key: pending.key,
               stateIds: stateIds,
             );
+            _unavailableWorldSections.remove(pending.key);
             _worldSections[pending.key] = snapshot;
             _pendingWorldSection = null;
             _notify();
           }
+        case 'world_section_unavailable':
+          final pending = _pendingWorldSection;
+          final seq = message['seq'];
+          final epoch = message['sessionEpoch'];
+          final subscriptionId = message['subscriptionId'];
+          final revision = message['revision'];
+          final fingerprint = message['registryFingerprint'];
+          final dimension = message['dimension'];
+          final chunkX = message['chunkX'];
+          final chunkZ = message['chunkZ'];
+          final sectionY = message['sectionY'];
+          final reason = message['reason'];
+          if (phase != ConnectionPhase.connected ||
+              _worldSectionProtocol != 1 ||
+              !playerAttached ||
+              pending == null ||
+              message['protocol'] != 1 ||
+              seq is! int ||
+              seq != pending.sequence ||
+              epoch != sessionEpoch ||
+              subscriptionId != pending.key.subscriptionId ||
+              revision != pending.key.revision ||
+              subscriptionId != bootstrapSubscriptionId ||
+              revision != bootstrapRevision ||
+              fingerprint != pending.registryFingerprint ||
+              fingerprint != registryFingerprint ||
+              dimension != pending.dimension ||
+              dimension != bootstrapDimension ||
+              chunkX != pending.key.chunkX ||
+              chunkZ != pending.key.chunkZ ||
+              sectionY != pending.key.sectionY ||
+              reason != 'not_loaded' ||
+              pending.parts.any((value) => value != null)) {
+            throw const FormatException();
+          }
+          _pendingWorldSection = null;
+          _worldSections.remove(pending.key);
+          _unavailableWorldSections.add(pending.key);
+          _notify();
         case 'pong':
           final seq = message['seq'];
           if (phase != ConnectionPhase.connected ||
@@ -667,7 +722,10 @@ class ObserverConnection extends ChangeNotifier {
       chunkZ: chunkZ,
       sectionY: sectionY,
     );
-    if (_worldSections.containsKey(key)) return;
+    if (_worldSections.containsKey(key) ||
+        _unavailableWorldSections.contains(key)) {
+      return;
+    }
     try {
       final seq = _sequence++;
       _pendingWorldSection = _WorldSectionAssembly(
@@ -810,6 +868,7 @@ class ObserverConnection extends ChangeNotifier {
     registryTotal = 0;
     _blockStateNames.clear();
     _worldSections.clear();
+    _unavailableWorldSections.clear();
     phase = ConnectionPhase.offline;
     status = '尚未連線';
     _notify();
