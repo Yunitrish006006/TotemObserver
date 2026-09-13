@@ -58,6 +58,29 @@ public final class ObserverMovementProtocolGameTest {
         }).thenSucceed();
     }
 
+    @GameTest(maxTicks = 100_000)
+    public void admissionConstructionInsideTickCallbackIsDeferred(GameTestHelper helper) {
+        var server = helper.getLevel().getServer();
+        var completed = new CompletableFuture<Void>();
+        server.schedule(server.wrapRunnable(() -> server.addTickable(new Runnable() {
+            private boolean ran;
+            @Override public void run() {
+                if (ran) return;
+                ran = true;
+                // Regression: inline addTickable here mutates tickChildren's active iterator.
+                var admissions = new ObserverPlayerAdmissionService(server);
+                server.schedule(server.wrapRunnable(() -> {
+                    admissions.close();
+                    completed.complete(null);
+                }));
+            }
+        })));
+        helper.startSequence().thenWaitUntil(() -> {
+            if (!completed.isDone()) helper.fail("Waiting for deferred admission registration");
+            completed.join();
+        }).thenSucceed();
+    }
+
     private static void run(GameTestHelper helper, boolean hostile) {
         var server = helper.getLevel().getServer();
         // Capture fixture location on the test/server thread; all world access below is marshalled.
