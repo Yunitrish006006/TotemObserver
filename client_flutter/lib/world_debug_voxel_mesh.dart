@@ -151,27 +151,20 @@ abstract final class WorldDebugVoxelMesher {
     )
     sectionAt,
   }) {
-    int x = localX;
-    int y = localY;
-    int z = localZ;
+    final (dx, dy, dz) = switch (direction) {
+      WorldVoxelFaceDirection.west => (-1, 0, 0),
+      WorldVoxelFaceDirection.east => (1, 0, 0),
+      WorldVoxelFaceDirection.down => (0, -1, 0),
+      WorldVoxelFaceDirection.up => (0, 1, 0),
+      WorldVoxelFaceDirection.north => (0, 0, -1),
+      WorldVoxelFaceDirection.south => (0, 0, 1),
+    };
+    int x = localX + dx;
+    int y = localY + dy;
+    int z = localZ + dz;
     int chunkX = section.key.chunkX;
     int chunkZ = section.key.chunkZ;
     int sectionY = section.key.sectionY;
-
-    switch (direction) {
-      case WorldVoxelFaceDirection.west:
-        x--;
-      case WorldVoxelFaceDirection.east:
-        x++;
-      case WorldVoxelFaceDirection.down:
-        y--;
-      case WorldVoxelFaceDirection.up:
-        y++;
-      case WorldVoxelFaceDirection.north:
-        z--;
-      case WorldVoxelFaceDirection.south:
-        z++;
-    }
 
     if (x < 0) {
       chunkX--;
