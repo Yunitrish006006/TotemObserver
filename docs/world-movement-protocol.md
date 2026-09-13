@@ -78,8 +78,11 @@ Expected dedicated count is 15 (three added to the twelve-test foundation).
 Formal Build/3-JVM E2E/Runtime evidence is recorded in the stacked PR.
 Browser keyboard/mouse UX and moving window integration remain next slices.
 
-Admission service tick registration is always queued through the server task
-queue, even when constructed on the server thread. This avoids modifying
-Minecraft's tickable list from an executing tick callback. Closing before
-registration makes that queued task a no-op. A dedicated regression constructs
-the service inside an actual server tick callback.
+Admission services use one stable Fabric END_SERVER_TICK callback and a concurrent
+set of live services. Construction/closure never modifies Minecraft's tickable
+list; closure removes the service instead of retaining per-service no-op
+callbacks. Only the matching server invokes a service, and all Minecraft state
+access remains on its thread. A dedicated lifecycle test opens and closes a real
+admission from inside the Fabric tick callback. General server task scheduling
+is insufficient to protect vanilla tickable-list iteration because nested task
+processing may execute queued work before that iteration ends.
