@@ -1,0 +1,23 @@
+name: Dart Format Diagnostic
+
+on:
+  push:
+    branches:
+      - feat/world-section-scheduler
+
+permissions:
+  contents: read
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.0'
+          channel: stable
+          cache: true
+      - name: Show canonical scheduler formatting
+        working-directory: client_flutter
+        run: dart format --output=show lib/world_section_scheduler.dart
