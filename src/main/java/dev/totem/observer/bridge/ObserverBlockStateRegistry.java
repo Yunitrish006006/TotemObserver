@@ -20,9 +20,9 @@ import java.util.Objects;
  * <p>The block-state registry is frozen before a dedicated server accepts players. Observer therefore snapshots it
  * lazily once, then serves small deterministic pages without touching world/chunk state from the Netty thread.</p>
  *
- * <p>Visual flags are deliberately minimal and context-free. Bit 0 means the authoritative BlockState reports air;
- * bit 1 means it reports that it can occlude. Neither flag is a promise that a state is a full cube or that it can be
- * rendered using a cube model.</p>
+ * <p>Visual flags are deliberately minimal, independent and context-free. Bit 0 means the authoritative BlockState
+ * reports air; bit 1 means it reports that it can occlude. Neither flag is a promise that a state is a full cube or
+ * that it can be rendered using a cube model.</p>
  */
 final class ObserverBlockStateRegistry {
     static final int PROTOCOL = 1;
@@ -48,8 +48,7 @@ final class ObserverBlockStateRegistry {
                 }
             }
             for (Integer flags : visualFlags) {
-                if (flags == null || flags < 0 || flags > (VISUAL_AIR | VISUAL_CAN_OCCLUDE)
-                        || ((flags & VISUAL_AIR) != 0 && (flags & VISUAL_CAN_OCCLUDE) != 0)) {
+                if (flags == null || flags < 0 || flags > (VISUAL_AIR | VISUAL_CAN_OCCLUDE)) {
                     throw new IllegalArgumentException("Invalid block-state visual flags");
                 }
             }
@@ -90,9 +89,6 @@ final class ObserverBlockStateRegistry {
             int flags = 0;
             if (state.isAir()) flags |= VISUAL_AIR;
             if (state.canOcclude()) flags |= VISUAL_CAN_OCCLUDE;
-            if ((flags & VISUAL_AIR) != 0 && (flags & VISUAL_CAN_OCCLUDE) != 0) {
-                throw new IllegalStateException("Air block state unexpectedly occludes: " + canonical);
-            }
             visualFlags.add(flags);
             digest.update(canonical.getBytes(StandardCharsets.UTF_8));
             digest.update((byte) 0);
