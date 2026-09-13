@@ -217,6 +217,32 @@ public final class ObserverPlayerAdmissionService implements AutoCloseable {
         return result;
     }
 
+    /** Transport serializes use against movement, section and bootstrap requests. */
+    CompletableFuture<ObserverBlockUse.Result> useBlock(Admission admission, String dimension, long receivedNanos,
+                                                       BooleanSupplier sessionAuthorized) {
+        var result = new CompletableFuture<ObserverBlockUse.Result>();
+        execute(() -> {
+            try {
+                BooleanSupplier authorized = () -> System.nanoTime() - receivedNanos <= TimeUnit.MILLISECONDS.toNanos(250)
+                        && admission != null && valid(admission.playSession(), admission)
+                        && sessionAuthorized.getAsBoolean()
+                        && dimension.equals(admission.player().level().dimension().identifier().toString());
+                if (!authorized.getAsBoolean()) { result.complete(null); return; }
+                var motion = motions.get(admission);
+                if (motion != null) {
+                    if (motion.response != null) { result.complete(null); return; }
+                    // Stop held input while the caller refreshes its world view.
+                    motion.input = ObserverMovementIntent.idle(admission.player().getYRot(), admission.player().getXRot());
+                    motion.inputTime = receivedNanos;
+                }
+                result.complete(ObserverBlockUse.use(admission.player(), authorized));
+            } catch (Throwable failure) {
+                result.completeExceptionally(failure);
+            }
+        });
+        return result;
+    }
+
     private void tickMotions() {
         for (var iterator = motions.values().iterator(); iterator.hasNext();) {
             var motion = iterator.next();
