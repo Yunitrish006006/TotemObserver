@@ -59,13 +59,8 @@ class WorldSectionKey {
       sectionY == other.sectionY;
 
   @override
-  int get hashCode => Object.hash(
-    subscriptionId,
-    revision,
-    chunkX,
-    chunkZ,
-    sectionY,
-  );
+  int get hashCode =>
+      Object.hash(subscriptionId, revision, chunkX, chunkZ, sectionY);
 }
 
 @immutable
@@ -163,15 +158,13 @@ class ObserverConnection extends ChangeNotifier {
 
   WorldSectionSnapshot? worldSection(int chunkX, int chunkZ, int sectionY) {
     if (!hasWorldBootstrap) return null;
-    return _worldSections[
-      WorldSectionKey(
-        subscriptionId: bootstrapSubscriptionId,
-        revision: bootstrapRevision,
-        chunkX: chunkX,
-        chunkZ: chunkZ,
-        sectionY: sectionY,
-      )
-    ];
+    return _worldSections[WorldSectionKey(
+      subscriptionId: bootstrapSubscriptionId,
+      revision: bootstrapRevision,
+      chunkX: chunkX,
+      chunkZ: chunkZ,
+      sectionY: sectionY,
+    )];
   }
 
   Future<void> authenticate(
@@ -666,9 +659,7 @@ class ObserverConnection extends ChangeNotifier {
       return;
     }
     final minSectionY = _sectionYForBlockY(bootstrapMinY);
-    final maxSectionY = _sectionYForBlockY(
-      bootstrapMinY + bootstrapHeight - 1,
-    );
+    final maxSectionY = _sectionYForBlockY(bootstrapMinY + bootstrapHeight - 1);
     if (sectionY < minSectionY || sectionY > maxSectionY) return;
     final key = WorldSectionKey(
       subscriptionId: bootstrapSubscriptionId,

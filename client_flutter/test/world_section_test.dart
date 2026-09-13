@@ -162,7 +162,11 @@ void main() {
     expect(snapshot.stateAt(15, 15, 15), 95);
 
     connection.requestWorldSection(10, -3, -4);
-    expect(socket.sent.length, 5, reason: 'cached section must not request again');
+    expect(
+      socket.sent.length,
+      5,
+      reason: 'cached section must not request again',
+    );
     connection.resyncWorld();
     expect(jsonDecode(socket.sent.last), {'type': 'world_bootstrap', 'seq': 4});
     socket.receive(bootstrap(seq: 4, revision: 2));
