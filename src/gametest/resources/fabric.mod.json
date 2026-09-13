@@ -40,7 +40,8 @@
       "dev.totem.observer.bridge.ObserverWorldSectionUnavailableGameTest",
       "dev.totem.observer.bridge.ObserverBlockStateRegistryGameTest",
       "dev.totem.observer.runtime.ObserverAccessGameTest",
-      "dev.totem.observer.bridge.ObserverMovementDriverGameTest"
+      "dev.totem.observer.bridge.ObserverMovementDriverGameTest",
+      "dev.totem.observer.bridge.ObserverMovementProtocolGameTest"
     ]
   },
   "depends": {
