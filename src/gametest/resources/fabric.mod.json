@@ -42,7 +42,8 @@
       "dev.totem.observer.runtime.ObserverAccessGameTest",
       "dev.totem.observer.bridge.ObserverMovementDriverGameTest",
       "dev.totem.observer.bridge.ObserverMovementProtocolGameTest",
-      "dev.totem.observer.bridge.ObserverBlockTargetingGameTest"
+      "dev.totem.observer.bridge.ObserverBlockTargetingGameTest",
+      "dev.totem.observer.bridge.ObserverBlockUseGameTest"
     ]
   },
   "depends": {
