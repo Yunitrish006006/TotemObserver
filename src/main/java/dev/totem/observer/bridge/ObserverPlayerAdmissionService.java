@@ -141,7 +141,11 @@ public final class ObserverPlayerAdmissionService implements AutoCloseable {
         this.server = Objects.requireNonNull(server, "server");
         // PrepareSpawnTask deliberately spans ticks while spawn chunks are located/loaded. MinecraftServer
         // has no tickable removal API, so a closed service leaves only this constant-time no-op callback.
-        execute(() -> server.addTickable(this::tickPendingAdmissions));
+        // execute() may run inline inside an existing tickable (including GameTest callbacks).
+        // Always enqueue registration so tickChildren never observes its list changing mid-iteration.
+        server.schedule(server.wrapRunnable(() -> {
+            if (!closed) server.addTickable(this::tickPendingAdmissions);
+        }));
     }
 
     /** Completes only after vanilla spawn preparation and PlayerList admission have run on the server thread. */
