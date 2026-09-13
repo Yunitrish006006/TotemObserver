@@ -24,10 +24,13 @@ import java.util.concurrent.*;
 
 /** Real wire mutation, refresh barrier and hostile binding validation. */
 public final class ObserverBlockUseProtocolGameTest {
-    @GameTest(maxTicks = 100_000)
+    // Dedicated GameTests tick faster than real time; account hashing and the
+    // real socket scenarios are bounded by the 45-second future deadline below.
+    @GameTest(maxTicks = 1_000_000)
     public void authenticatedUseRequiresRefreshAndRejectsHostileRequests(GameTestHelper helper) {
         var server = helper.getLevel().getServer();
         var pos = helper.absolutePos(new BlockPos(1, 2, 1));
+        var currentScenario = new java.util.concurrent.atomic.AtomicInteger(-1);
         var result = CompletableFuture.runAsync(() -> {
             java.nio.file.Path directory = null;
             try {
@@ -39,6 +42,7 @@ public final class ObserverBlockUseProtocolGameTest {
                      var client = HttpClient.newHttpClient()) {
                     int port = bridge.start(0, "http://localhost:8080");
                     for (int scenario = 0; scenario < 9; scenario++) {
+                        currentScenario.set(scenario);
                         var inbox = new Inbox();
                         var socket = client.newWebSocketBuilder().header("Origin", "http://localhost:8080")
                                 .subprotocols(ObserverAuthenticatedExchange.PROTOCOL)
@@ -138,7 +142,7 @@ public final class ObserverBlockUseProtocolGameTest {
             }
         }).orTimeout(45, TimeUnit.SECONDS);
         helper.startSequence().thenWaitUntil(() -> {
-            if (!result.isDone()) helper.fail("Waiting for authenticated block use");
+            if (!result.isDone()) helper.fail("Waiting for authenticated block use scenario " + currentScenario.get());
             result.join();
         }).thenSucceed();
     }
