@@ -6,7 +6,7 @@ on:
       - feat/world-section-contract
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   format-probe:
@@ -18,8 +18,15 @@ jobs:
           flutter-version: '3.47.0'
           channel: stable
           cache: true
-      - name: Print formatter diff
+      - name: Apply formatter output
         working-directory: client_flutter
         run: |
           dart format lib/connection.dart test/world_section_test.dart
-          git diff -- lib/connection.dart test/world_section_test.dart
+          cd ..
+          if ! git diff --quiet -- client_flutter/lib/connection.dart client_flutter/test/world_section_test.dart; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add client_flutter/lib/connection.dart client_flutter/test/world_section_test.dart
+            git commit -m "style: format world section client"
+            git push origin HEAD:feat/world-section-contract
+          fi
