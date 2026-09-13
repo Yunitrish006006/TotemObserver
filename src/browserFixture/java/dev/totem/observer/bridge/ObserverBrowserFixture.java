@@ -5,6 +5,11 @@ import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.LeverBlock;
+import net.minecraft.world.level.block.state.properties.AttachFace;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.gamerules.GameRules;
@@ -20,6 +25,8 @@ public final class ObserverBrowserFixture implements ModInitializer {
     private ObserverBridgeServer bridge;
     private Path results;
     private int ticks;
+    private java.util.UUID preparedPlayer;
+    private static final BlockPos LEVER = new BlockPos(10, 65, 10);
 
     @Override
     public void onInitialize() {
@@ -51,6 +58,11 @@ public final class ObserverBrowserFixture implements ModInitializer {
                 }
             }
             level.setRespawnData(LevelData.RespawnData.of(level.dimension(), new BlockPos(8, 64, 8), 0, 25));
+            level.setBlock(LEVER.south(), Blocks.STONE.defaultBlockState(), 3);
+            level.setBlock(LEVER, Blocks.LEVER.defaultBlockState()
+                    .setValue(LeverBlock.FACE, AttachFace.WALL)
+                    .setValue(LeverBlock.FACING, Direction.NORTH)
+                    .setValue(LeverBlock.POWERED, false), 3);
             var accounts = new ObserverAccountService(new ObserverAccountStore(results.resolve("accounts.properties")), true);
             bridge = new ObserverBridgeServer(accounts, new ObserverPlaySessionService(),
                     new ObserverPlayerAdmissionService(server));
@@ -75,8 +87,18 @@ public final class ObserverBrowserFixture implements ModInitializer {
             var state = new JsonObject();
             state.addProperty("tick", server.getTickCount());
             state.addProperty("players", server.getPlayerList().getPlayerCount());
+            state.addProperty("leverPowered", server.overworld().getBlockState(LEVER).getValue(LeverBlock.POWERED));
             if (server.getPlayerList().getPlayerCount() == 1) {
                 var player = server.getPlayerList().getPlayers().getFirst();
+                if (!player.getUUID().equals(preparedPlayer)) {
+                    // Test setup only: explicitly prepare the empty-hand capability.
+                    // Production never deletes onboarding items or edits inventory for use.
+                    player.setItemInHand(InteractionHand.MAIN_HAND, ItemStack.EMPTY);
+                    player.setItemInHand(InteractionHand.OFF_HAND, ItemStack.EMPTY);
+                    preparedPlayer = player.getUUID();
+                }
+                state.addProperty("mainHandEmpty", player.getMainHandItem().isEmpty());
+                state.addProperty("offHandEmpty", player.getOffhandItem().isEmpty());
                 state.addProperty("x", player.getX());
                 state.addProperty("y", player.getY());
                 state.addProperty("z", player.getZ());

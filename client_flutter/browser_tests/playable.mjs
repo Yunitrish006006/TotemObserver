@@ -63,7 +63,7 @@ try {
   browser=await chromium.launch({headless:true,args:['--no-sandbox'],
     executablePath:process.env.CHROME_BIN || (existsSync('/usr/bin/chromium')?'/usr/bin/chromium':undefined)});
   page=await browser.newPage({viewport:{width:1100,height:1100}});
-  const errors=[], corrections=[], bootstraps=[], requests=[];
+  const errors=[], corrections=[], bootstraps=[], requests=[], uses=[], useRequests=[];
   let sections=0; const floorParts=new Map();
   page.on('pageerror',()=>errors.push('runtime error'));
   // Passive observation only: no routing, mocked response, or injected input protocol.
@@ -72,6 +72,10 @@ try {
       const message=JSON.parse(event.payload.toString());
       if(message.type==='world_movement') corrections.push(message);
       if(message.type==='world_bootstrap') bootstraps.push(message);
+      if(message.type==='world_block_use') {
+        uses.push(message);
+        assert.ok(uses.length<10,'Bounded use acknowledgments');
+      }
       if(message.type==='world_section') {
         sections++;
         if(message.sectionY===3) {
@@ -84,6 +88,12 @@ try {
     });
     socket.on('framesent',event=>{
       const message=JSON.parse(event.payload.toString());
+      if(message.type==='world_block_use') {
+        assert.deepEqual(Object.keys(message).sort(),
+          ['type','protocol','seq','sessionEpoch','subscriptionId','revision','dimension'].sort());
+        useRequests.push(message);
+        assert.ok(useRequests.length<10,'Bounded use requests');
+      }
       if(message.type==='world_movement') {
         assert.equal(Object.hasOwn(message,'x'),false);
         assert.equal(Object.hasOwn(message,'y'),false);
@@ -125,9 +135,45 @@ try {
   await page.waitForFunction(() => [...document.querySelectorAll('[aria-label]')]
     .some(node => node.getAttribute('aria-label')?.includes('準星選取')) || document.body.textContent.includes('準星選取'));
   await page.screenshot({path:resolve(evidence,'terrain.png')});
+  const activationBox=await activate.boundingBox();
+  let mouseX=activationBox.x+activationBox.width/2, mouseY=activationBox.y+activationBox.height/2;
   await activate.click();
   await page.waitForFunction(()=>document.pointerLockElement!==null);
   await page.waitForFunction(()=>[...document.querySelectorAll('[aria-label]')].some(node=>node.getAttribute('aria-label')?.includes('WASD')) || document.body.textContent.includes('WASD'));
+  // Aim through real pointer-lock mouse deltas; corrections alone decide when aim has settled.
+  const wrap=angle=>((angle+180)%360+360)%360-180;
+  async function aim(yaw,pitch) {
+    for(let attempt=0;attempt<12;attempt++) {
+      const before=corrections.at(-1);
+      if(!before) {await waitFor(()=>corrections.length>0,'initial camera correction'); continue;}
+      const dyaw=wrap(yaw-before.yaw), dpitch=pitch-before.pitch;
+      if(Math.abs(dyaw)<0.5 && Math.abs(dpitch)<0.5) return;
+      mouseX+=Math.max(-150,Math.min(150,dyaw/0.15));
+      mouseY+=Math.max(-150,Math.min(150,dpitch/0.15));
+      await page.mouse.move(mouseX,mouseY);
+      await waitFor(()=>corrections.at(-1)?.seq>before.seq &&
+        (Math.abs(wrap(corrections.at(-1).yaw-before.yaw))>0.05 ||
+         Math.abs(corrections.at(-1).pitch-before.pitch)>0.05),'mouse aim correction');
+    }
+    throw new Error('Could not settle authoritative use aim');
+  }
+  const useOrigin=await state();
+  assert.ok(useOrigin.mainHandEmpty && useOrigin.offHandEmpty,'Explicit empty-hand fixture');
+  assert.equal(useOrigin.leverPowered,false);
+  const dx=10.5-useOrigin.x, dz=10.75-useOrigin.z;
+  await aim(-Math.atan2(dx,dz)*180/Math.PI,
+    Math.atan2(useOrigin.y+1.62-65.5,Math.hypot(dx,dz))*180/Math.PI);
+  const beforeUseRevision=bootstraps.at(-1).revision;
+  await page.keyboard.press('e');
+  await waitFor(()=>uses.length===1,'browser use acknowledgment');
+  assert.equal(uses[0].outcome,'applied');
+  assert.equal(uses[0].refreshRequired,true);
+  assert.equal(uses[0].seq,useRequests[0].seq);
+  assert.equal(uses[0].revision,beforeUseRevision);
+  await waitFor(async()=> (await state()).leverPowered===true,'real lever powered by browser');
+  await waitFor(()=>bootstraps.at(-1).revision>beforeUseRevision,'post-use authoritative refresh');
+  await page.screenshot({path:resolve(evidence,'after-block-use.png')});
+  await aim(0,25);
   await page.keyboard.down('w');
   await waitFor(async()=> (await state()).z>13.5,'walk to wall');
   await page.waitForTimeout(700);
@@ -143,8 +189,9 @@ try {
   await waitFor(async()=> (await state()).z>18,'cross chunk boundary');
   await page.keyboard.up('w');
   await waitFor(()=>bootstraps.some(b=>b.centerChunkZ>=1),'moving authoritative window');
+  const beforeLookSequence=corrections.at(-1).seq;
   await page.mouse.move(500,400); await page.mouse.move(530,620);
-  await waitFor(()=>corrections.some(c=>Math.abs(c.yaw)>1),'mouse look acknowledged');
+  await waitFor(()=>corrections.some(c=>c.seq>beforeLookSequence && Math.abs(c.yaw)>1),'new mouse look acknowledged');
   await page.keyboard.press('Escape');
   await page.waitForFunction(()=>document.pointerLockElement===null);
   await waitFor(()=>requests.at(-1)?.forward===0 && requests.at(-1)?.strafe===0,'release input');
@@ -161,9 +208,10 @@ try {
   assert.equal(errors.length,0);
   await writeFile(resolve(evidence,'result.json'),JSON.stringify({passed:true,fixture:ready.fixture,
     checks:['real-admission','terrain-snapshots','visible-target-selection','pointer-lock','WASD','wall-collision','jump-land',
-      'mouse-look','authoritative-correction','cross-chunk-window','logout-release'],
-    initial,wall,jumped,final,sectionParts:sections,revisions:bootstraps.map(b=>b.revision)},null,2));
-  console.log('Real browser / Minecraft movement smoke passed');
+      'mouse-look','authoritative-correction','cross-chunk-window','logout-release',
+      'empty-hand-fixture','browser-E-use','real-lever-powered','post-use-revision-refresh'],
+    initial,wall,jumped,final,uses,sectionParts:sections,revisions:bootstraps.map(b=>b.revision)},null,2));
+  console.log('Real browser / Minecraft movement and block-use smoke passed');
 } catch(error) {
   await page?.screenshot({path:resolve(evidence,'failure.png')}).catch(()=>{});
   throw error;
