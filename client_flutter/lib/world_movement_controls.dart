@@ -24,6 +24,8 @@ class _ControlsState extends State<WorldMovementControls> {
   final Set<PhysicalKeyboardKey> _keys = {};
   late final WorldPointerCapture _capture;
   Timer? _timer;
+  bool _useQueued = false, _useLookSent = false;
+  double _useYaw = 0, _usePitch = 0;
   bool _active = false,
       _started = false,
       _requested = false,
@@ -53,6 +55,7 @@ class _ControlsState extends State<WorldMovementControls> {
     super.didUpdateWidget(oldWidget);
     if (!identical(oldWidget.connection, widget.connection)) {
       oldWidget.connection.removeListener(_connectionChanged);
+      oldWidget.connection.cancelBlockUsePreparation();
       _started = false;
       _release();
       widget.connection.addListener(_connectionChanged);
@@ -67,6 +70,7 @@ class _ControlsState extends State<WorldMovementControls> {
   }
 
   void _clear() {
+    _cancelUse();
     _keys.clear();
     _yawDelta = 0;
     _pitchDelta = 0;
@@ -101,7 +105,11 @@ class _ControlsState extends State<WorldMovementControls> {
   }
 
   void _look(double dx, double dy) {
-    if (!_active || !_focus.hasPrimaryFocus || !dx.isFinite || !dy.isFinite)
+    if (_useQueued ||
+        !_active ||
+        !_focus.hasPrimaryFocus ||
+        !dx.isFinite ||
+        !dy.isFinite)
       return;
     _yawDelta = (_yawDelta + dx.clamp(-200, 200) * 0.15).clamp(-180, 180);
     _pitchDelta = (_pitchDelta + dy.clamp(-200, 200) * 0.15).clamp(-90, 90);
@@ -111,6 +119,21 @@ class _ControlsState extends State<WorldMovementControls> {
     if (!_active) return KeyEventResult.ignored;
     if (event.physicalKey == PhysicalKeyboardKey.escape) {
       _release();
+      return KeyEventResult.handled;
+    }
+    if (event.physicalKey == PhysicalKeyboardKey.keyE &&
+        widget.connection.canUseBlock) {
+      if (event is KeyDownEvent &&
+          !_useQueued &&
+          _focus.hasPrimaryFocus &&
+          widget.connection.prepareBlockUse()) {
+        _useQueued = true;
+        _useLookSent = false;
+        _useYaw = widget.connection.worldYaw + _yawDelta;
+        _usePitch = widget.connection.worldPitch + _pitchDelta;
+        _yawDelta = 0;
+        _pitchDelta = 0;
+      }
       return KeyEventResult.handled;
     }
     if (!_allowed.contains(event.physicalKey)) return KeyEventResult.ignored;
@@ -126,6 +149,24 @@ class _ControlsState extends State<WorldMovementControls> {
     final connection = widget.connection;
     if (!_started || !connection.canMove) return;
     final enabled = _active && _focus.hasPrimaryFocus;
+    if (_useQueued) {
+      if (!enabled || !connection.blockUsePreparing) {
+        _cancelUse();
+      } else if (!_useLookSent) {
+        _useLookSent = connection.sendMovement(
+          strafe: 0,
+          forward: 0,
+          yaw: _useYaw,
+          pitch: _usePitch,
+          jump: false,
+        );
+      } else if (!connection.movementPending) {
+        if (!connection.lastMovementApplied || connection.sendBlockUse()) {
+          _cancelUse();
+        }
+      }
+      return;
+    }
     int held(PhysicalKeyboardKey key) => enabled && _keys.contains(key) ? 1 : 0;
     if (connection.sendMovement(
       strafe: held(PhysicalKeyboardKey.keyA) - held(PhysicalKeyboardKey.keyD),
@@ -138,6 +179,12 @@ class _ControlsState extends State<WorldMovementControls> {
       _yawDelta = 0;
       _pitchDelta = 0;
     }
+  }
+
+  void _cancelUse() {
+    _useQueued = false;
+    _useLookSent = false;
+    widget.connection.cancelBlockUsePreparation();
   }
 
   @override
@@ -153,7 +200,9 @@ class _ControlsState extends State<WorldMovementControls> {
         const SizedBox(height: 8),
         if (widget.connection.canMove)
           _active
-              ? const Text('WASD 移動 · 滑鼠轉向 · Space 跳躍 · Esc 釋放')
+              ? Text(
+                  'WASD 移動 · 滑鼠轉向 · Space 跳躍${widget.connection.canUseBlock ? ' · E 使用' : ''} · Esc 釋放',
+                )
               : TextButton(
                   onPressed: _capture.supported ? _activate : null,
                   child: Text(_capture.supported ? '點擊操作世界' : '此平台尚未支援滑鼠鎖定'),
