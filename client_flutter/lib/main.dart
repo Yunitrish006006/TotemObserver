@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'connection.dart';
+import 'world_debug_slice.dart';
 import 'world_section_scheduler.dart';
 import 'world_visible_view.dart';
 
@@ -192,6 +193,11 @@ class _ConnectionPageState extends State<ConnectionPage> {
                           '未載入 ${visibleWorld.unavailableCount}）',
                           textAlign: TextAlign.center,
                         ),
+                        const SizedBox(height: 12),
+                        WorldDebugSliceView(
+                          connection: connection,
+                          plan: visibleWorld.plan!,
+                        ),
                       ],
                       const SizedBox(height: 16),
                       Text(
@@ -199,8 +205,8 @@ class _ConnectionPageState extends State<ConnectionPage> {
                             ? visibleWorld.hasPlan
                                   ? visibleWorld.resolvedCount ==
                                             visibleWorld.targetCount
-                                        ? '已建立受限的伺服器權威世界快取；畫面與遊戲操作仍未啟用。'
-                                        : '正在建立受限的伺服器權威世界快取；畫面與遊戲操作仍未啟用。'
+                                        ? '已建立受限的伺服器權威世界快取；目前顯示 raw BlockState 偵錯切片，正式畫面與遊戲操作仍未啟用。'
+                                        : '正在建立受限的伺服器權威世界快取；目前顯示 raw BlockState 偵錯切片，正式畫面與遊戲操作仍未啟用。'
                                   : '已取得伺服器權威角色快照；區塊同步、畫面與遊戲操作仍未啟用。'
                             : connection.playerAttached
                             ? '角色已存在於伺服器世界並使用原版 playerdata；區塊畫面與遊戲操作仍在開發中。'
