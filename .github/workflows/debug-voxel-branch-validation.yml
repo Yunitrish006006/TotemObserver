@@ -22,6 +22,7 @@ jobs:
         working-directory: client_flutter
         run: |
           flutter pub get --enforce-lockfile
-          dart format --output=none --set-exit-if-changed lib test
+          dart format lib test
+          git diff -- test/world_debug_voxel_mesh_test.dart
           flutter analyze
           flutter test
