@@ -38,6 +38,7 @@
     "fabric-gametest": [
       "dev.totem.observer.bridge.ObserverBridgeGameTest",
       "dev.totem.observer.bridge.ObserverWorldSectionUnavailableGameTest",
+      "dev.totem.observer.bridge.ObserverBlockStateRegistryGameTest",
       "dev.totem.observer.runtime.ObserverAccessGameTest"
     ]
   },
