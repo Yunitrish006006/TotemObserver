@@ -32,6 +32,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
+import java.util.function.LongSupplier;
 
 /**
  * Owns the Minecraft-side lifetime of authenticated Observer players.
@@ -143,6 +144,7 @@ public final class ObserverPlayerAdmissionService implements AutoCloseable {
     }
 
     private final MinecraftServer server;
+    private final LongSupplier nanoTime;
     private final Map<String, Active> active = new ConcurrentHashMap<>();
     /** Server-thread only; pending spawn preparation is advanced once per Minecraft tick. */
     private final Map<String, Pending> pending = new HashMap<>();
@@ -151,7 +153,13 @@ public final class ObserverPlayerAdmissionService implements AutoCloseable {
     private final Map<Admission, Motion> motions = new HashMap<>();
 
     public ObserverPlayerAdmissionService(MinecraftServer server) {
+        this(server, System::nanoTime);
+    }
+
+    /** Package-private monotonic clock seam for deterministic deadline tests. */
+    ObserverPlayerAdmissionService(MinecraftServer server, LongSupplier nanoTime) {
         this.server = Objects.requireNonNull(server, "server");
+        this.nanoTime = Objects.requireNonNull(nanoTime, "nanoTime");
         // Publish only after all instance fields, including server, are initialized.
         TICKING.add(this);
     }
@@ -181,7 +189,7 @@ public final class ObserverPlayerAdmissionService implements AutoCloseable {
         var result = new CompletableFuture<MovementResult>();
         execute(() -> {
             try {
-                if (System.nanoTime() - receivedNanos > TimeUnit.MILLISECONDS.toNanos(250)
+                if (nanoTime.getAsLong() - receivedNanos > TimeUnit.MILLISECONDS.toNanos(250)
                         || admission == null || !valid(admission.playSession(), admission) || !sessionAuthorized.getAsBoolean()
                         || !dimension.equals(admission.player().level().dimension().identifier().toString())) {
                     result.complete(null);
@@ -223,7 +231,7 @@ public final class ObserverPlayerAdmissionService implements AutoCloseable {
         var result = new CompletableFuture<ObserverBlockUse.Result>();
         execute(() -> {
             try {
-                BooleanSupplier authorized = () -> System.nanoTime() - receivedNanos <= TimeUnit.MILLISECONDS.toNanos(250)
+                BooleanSupplier authorized = () -> nanoTime.getAsLong() - receivedNanos <= TimeUnit.MILLISECONDS.toNanos(250)
                         && admission != null && valid(admission.playSession(), admission)
                         && sessionAuthorized.getAsBoolean()
                         && dimension.equals(admission.player().level().dimension().identifier().toString());
@@ -253,9 +261,11 @@ public final class ObserverPlayerAdmissionService implements AutoCloseable {
                     continue;
                 }
                 var player = motion.admission.player();
-                boolean fresh = System.nanoTime() - motion.inputTime <= TimeUnit.MILLISECONDS.toNanos(250);
+                boolean fresh = nanoTime.getAsLong() - motion.inputTime <= TimeUnit.MILLISECONDS.toNanos(250);
                 var input = fresh ? motion.input : ObserverMovementIntent.idle(player.getYRot(), player.getXRot());
-                boolean applied = motion.driver.tick(input);
+                boolean simulated = motion.driver.tick(input);
+                // Successful idle physics does not mean an expired request was applied.
+                boolean applied = fresh && simulated;
                 if (motion.response != null) {
                     var response = motion.response;
                     motion.response = null;

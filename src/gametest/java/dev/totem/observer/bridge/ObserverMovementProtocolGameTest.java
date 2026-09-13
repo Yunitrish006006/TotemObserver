@@ -21,6 +21,42 @@ import java.util.concurrent.*;
 /** Real authenticated wire requests drive the admitted vanilla ServerPlayer. */
 public final class ObserverMovementProtocolGameTest {
     @GameTest(maxTicks = 100_000)
+    public void inputExpiringAfterEnqueueCannotAcknowledgeApplied(GameTestHelper helper) {
+        var server = helper.getLevel().getServer();
+        var clock = new java.util.concurrent.atomic.AtomicLong(TimeUnit.SECONDS.toNanos(1));
+        var sessions = new ObserverPlaySessionService();
+        var admissions = new ObserverPlayerAdmissionService(server, clock::get);
+        String account = "expiry_" + UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+        var auth = new ObserverAccountService.Session(account, UUID.randomUUID());
+        var origin = helper.absolutePos(new BlockPos(1, 10, 1));
+        var result = admissions.open(sessions.open(auth)).thenCompose(admission -> {
+            require(admission != null, "Missing expiry admission");
+            var player = admission.player();
+            player.setGameMode(GameType.SURVIVAL);
+            player.snapTo(origin.getX() + 0.5, origin.getY(), origin.getZ() + 0.5, 0, 0);
+            player.setDeltaMovement(Vec3.ZERO);
+            var before = player.position();
+            var queued = admissions.move(admission, player.level().dimension().identifier().toString(),
+                    new ObserverMovementIntent(0, 1, 90, 30, true), clock.get(), () -> true);
+            require(!queued.isDone(), "Movement must await server tick");
+            clock.addAndGet(TimeUnit.MILLISECONDS.toNanos(251));
+            return queued.thenAccept(correction -> {
+                require(correction != null && !correction.applied(), "Expired queued input acknowledged applied");
+                require(correction.state().yaw() == 0 && correction.state().pitch() == 0,
+                        "Expired look changed authoritative aim");
+                require(correction.state().x() == before.x && correction.state().z() == before.z,
+                        "Expired queued direction moved player");
+                require(player.getDeltaMovement().y < 0, "Idle gravity did not continue after expiry");
+            });
+        });
+        result.whenComplete((ignored, failure) -> { admissions.close(); sessions.close(); });
+        helper.startSequence().thenWaitUntil(() -> {
+            if (!result.isDone()) helper.fail("Waiting for queued movement expiry");
+            result.join();
+        }).thenSucceed();
+    }
+
+    @GameTest(maxTicks = 100_000)
     public void authenticatedMovementCorrectsAndExpiresInput(GameTestHelper helper) {
         run(helper, false);
     }
@@ -120,10 +156,14 @@ public final class ObserverMovementProtocolGameTest {
                                 require(player != null, "No admitted player");
                                 playerRef.set(player);
                                 var level = player.level();
-                                for (int x = -1; x <= 1; x++) {
-                                    for (int z = -1; z <= 1; z++) {
+                                // GameTests may simulate many ticks during 250 ms of
+                                // valid input. Contain the player instead of letting
+                                // it walk off a tiny floor into unrelated fixture space.
+                                for (int x = -2; x <= 2; x++) {
+                                    for (int z = -2; z <= 2; z++) {
                                         for (int y = 0; y < 4; y++) {
-                                            level.setBlockAndUpdate(origin.offset(x, y, z), Blocks.AIR.defaultBlockState());
+                                            var block = Math.abs(x) == 2 || Math.abs(z) == 2 ? Blocks.STONE : Blocks.AIR;
+                                            level.setBlockAndUpdate(origin.offset(x, y, z), block.defaultBlockState());
                                         }
                                         level.setBlockAndUpdate(origin.offset(x, -1, z), Blocks.STONE.defaultBlockState());
                                     }
@@ -167,9 +207,9 @@ public final class ObserverMovementProtocolGameTest {
                                             "Rejected movement mutated authoritative player before closing");
                                 });
                             } else {
-                                send(socket, request.toString());
-                                var moved = inbox.take("world_movement");
-                                require(moved.get("seq").getAsInt() == 2 && moved.get("sessionEpoch").equals(auth.get("sessionEpoch"))
+                                var nextSequence = new java.util.concurrent.atomic.AtomicInteger(3);
+                                var moved = freshMovement(socket, inbox, request, nextSequence);
+                                require(moved.get("seq").equals(request.get("seq")) && moved.get("sessionEpoch").equals(auth.get("sessionEpoch"))
                                         && moved.get("subscriptionId").equals(bootstrap.get("subscriptionId"))
                                         && moved.get("revision").equals(bootstrap.get("revision"))
                                         && moved.get("applied").getAsBoolean(), "Invalid movement acknowledgment");
@@ -178,18 +218,22 @@ public final class ObserverMovementProtocolGameTest {
                                         "Response position not backed by ServerPlayer"));
                                 // No new input: held direction expires after 250ms, idle physics settles.
                                 Thread.sleep(650);
-                                send(socket, "{\"type\":\"world_state\",\"seq\":3}");
+                                // A wall alone can hide latched forward input. Change
+                                // aim server-side after expiry: stale intent must not
+                                // restore its old yaw on subsequent idle ticks.
+                                onServer(server, () -> server.getPlayerList().getPlayer(uuid).setYRot(90));
+                                send(socket, "{\"type\":\"world_state\",\"seq\":" + nextSequence.getAndIncrement() + "}");
                                 var settled = inbox.take("world_state");
                                 Thread.sleep(300);
-                                send(socket, "{\"type\":\"world_state\",\"seq\":4}");
+                                send(socket, "{\"type\":\"world_state\",\"seq\":" + nextSequence.getAndIncrement() + "}");
                                 var later = inbox.take("world_state");
                                 require(Math.abs(later.get("z").getAsDouble() - settled.get("z").getAsDouble()) < 0.03,
-                                        "Expired input remained latched");
-                                var jump = movement(auth, bootstrap, 5);
+                                        "Expired input remained latched: " + settled + " -> " + later);
+                                require(later.get("yaw").getAsFloat() == 90, "Expired intent replayed old aim");
+                                var jump = movement(auth, bootstrap, nextSequence.getAndIncrement());
                                 jump.addProperty("forward", 0);
                                 jump.addProperty("jump", 1);
-                                send(socket, jump.toString());
-                                var jumped = inbox.take("world_movement");
+                                var jumped = freshMovement(socket, inbox, jump, nextSequence);
                                 require(jumped.get("serverTick").getAsInt() > moved.get("serverTick").getAsInt()
                                         && jumped.get("y").getAsDouble() > later.get("y").getAsDouble()
                                         && !jumped.get("onGround").getAsBoolean(), "Jump correction missing");
@@ -217,6 +261,22 @@ public final class ObserverMovementProtocolGameTest {
             if (!result.isDone()) helper.fail("Waiting for authenticated movement exchange");
             result.join();
         }).thenSucceed();
+    }
+
+    /** Retry only explicit unapplied corrections, with new sequences and the normal rate bound. */
+    private static JsonObject freshMovement(WebSocket socket, Inbox inbox, JsonObject request,
+                                            java.util.concurrent.atomic.AtomicInteger nextSequence) throws Exception {
+        for (int attempt = 0; attempt < 4; attempt++) {
+            send(socket, request.toString());
+            var correction = inbox.take("world_movement");
+            require(correction.get("seq").equals(request.get("seq")), "Wrong retry correction sequence");
+            if (correction.get("applied").getAsBoolean()) return correction;
+            if (attempt < 3) {
+                Thread.sleep(100);
+                request.addProperty("seq", nextSequence.getAndIncrement());
+            }
+        }
+        throw new AssertionError("No fresh movement applied within four bounded attempts");
     }
 
     private static JsonObject movement(JsonObject auth, JsonObject bootstrap, int seq) {
