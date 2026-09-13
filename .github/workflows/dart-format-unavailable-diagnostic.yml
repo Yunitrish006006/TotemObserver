@@ -1,0 +1,23 @@
+name: Dart Format Unavailable Diagnostic
+
+on:
+  push:
+    branches:
+      - feat/world-section-unavailable-response
+
+permissions:
+  contents: read
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.0'
+          channel: stable
+          cache: true
+      - name: Show canonical world-section test formatting
+        working-directory: client_flutter
+        run: dart format --output=show test/world_section_test.dart
