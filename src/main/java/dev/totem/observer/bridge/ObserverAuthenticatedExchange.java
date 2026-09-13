@@ -11,7 +11,7 @@ import java.util.*;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 
-/** Account-v1 connection state machine; chunk streaming and browser gameplay remain disabled. */
+/** Account-v1 connection state machine; bounded world snapshots are read-only and browser gameplay remains disabled. */
 final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<WebSocketFrame> {
     static final String PROTOCOL = "totem-observer-account-v1";
     static final int WORLD_STATE_PROTOCOL = 1;
@@ -23,9 +23,10 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
     private ObserverAccountService.Session session;
     private ObserverPlaySessionService.Session playSession;
     private ObserverPlayerAdmissionService.Admission playerAdmission;
-    private boolean selected, pending, ended, worldStatePending, worldBootstrapPending;
+    private boolean selected, pending, ended, worldStatePending, worldBootstrapPending, worldSectionPending;
     private long sequence = -1;
     private int worldSubscriptionId, worldBootstrapRevision;
+    private int worldBootstrapMinY, worldBootstrapHeight, worldBootstrapCenterChunkX, worldBootstrapCenterChunkZ;
     private String worldBootstrapDimension;
     private io.netty.util.concurrent.ScheduledFuture<?> deadline;
 
@@ -46,6 +47,7 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
                     + ",\"worldStateProtocol\":" + (playerAdmissions == null ? 0 : WORLD_STATE_PROTOCOL)
                     + ",\"worldBootstrapProtocol\":" + (playerAdmissions == null ? 0 : WORLD_BOOTSTRAP_PROTOCOL)
                     + ",\"worldRegistryProtocol\":" + (playerAdmissions == null ? 0 : ObserverBlockStateRegistry.PROTOCOL)
+                    + ",\"worldSectionProtocol\":" + (playerAdmissions == null ? 0 : ObserverWorldSectionCodec.PROTOCOL)
                     + ",\"play\":false}");
             deadline = ctx.executor().schedule(() -> stop(ctx, "Login timed out"), 10, TimeUnit.SECONDS);
         } else if (selected && event instanceof IdleStateEvent) stop(ctx, "Connection idle");
@@ -86,8 +88,14 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
             boolean worldState = "world_state".equals(type) && playerAdmissions != null;
             boolean worldBootstrap = "world_bootstrap".equals(type) && playerAdmissions != null;
             boolean worldRegistry = "world_registry".equals(type) && playerAdmissions != null;
-            Set<String> expectedKeys = worldRegistry ? Set.of("type", "seq", "offset") : Set.of("type", "seq");
-            if (!(ping || worldState || worldBootstrap || worldRegistry) || !message.keySet().equals(expectedKeys)) {
+            boolean worldSection = "world_section".equals(type) && playerAdmissions != null;
+            Set<String> expectedKeys = worldRegistry
+                    ? Set.of("type", "seq", "offset")
+                    : worldSection
+                    ? Set.of("type", "seq", "subscriptionId", "revision", "chunkX", "chunkZ", "sectionY")
+                    : Set.of("type", "seq");
+            if (!(ping || worldState || worldBootstrap || worldRegistry || worldSection)
+                    || !message.keySet().equals(expectedKeys)) {
                 stop(ctx, "Unsupported operation"); return;
             }
             long next = Long.parseLong(message.get("seq"));
@@ -96,7 +104,11 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
             if (ping) send(ctx, "{\"type\":\"pong\",\"seq\":" + next + "}");
             else if (worldState) requestWorldState(ctx, next);
             else if (worldBootstrap) requestWorldBootstrap(ctx, next);
-            else sendWorldRegistry(ctx, next, Integer.parseInt(message.get("offset")));
+            else if (worldRegistry) sendWorldRegistry(ctx, next, Integer.parseInt(message.get("offset")));
+            else requestWorldSection(ctx, next,
+                        Integer.parseInt(message.get("subscriptionId")), Integer.parseInt(message.get("revision")),
+                        Integer.parseInt(message.get("chunkX")), Integer.parseInt(message.get("chunkZ")),
+                        Integer.parseInt(message.get("sectionY")));
         } catch (Exception ignored) { stop(ctx, "Invalid message"); }
     }
 
@@ -163,6 +175,10 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
         } else {
             worldBootstrapRevision++;
         }
+        worldBootstrapMinY = snapshot.minY();
+        worldBootstrapHeight = snapshot.height();
+        worldBootstrapCenterChunkX = snapshot.centerChunkX();
+        worldBootstrapCenterChunkZ = snapshot.centerChunkZ();
         send(ctx, "{\"type\":\"world_bootstrap\",\"protocol\":" + WORLD_BOOTSTRAP_PROTOCOL
                 + ",\"seq\":" + requestSequence + ",\"sessionEpoch\":" + expectedSession.epoch()
                 + ",\"subscriptionId\":" + worldSubscriptionId + ",\"revision\":" + worldBootstrapRevision
@@ -180,6 +196,67 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
                 + ",\"seq\":" + requestSequence + ",\"sessionEpoch\":" + playSession.epoch()
                 + ",\"fingerprint\":\"" + page.fingerprint() + "\",\"offset\":" + page.offset()
                 + ",\"total\":" + page.total() + ",\"states\":" + states + "}");
+    }
+
+    private void requestWorldSection(ChannelHandlerContext ctx, long requestSequence, int subscriptionId, int revision,
+                                     int chunkX, int chunkZ, int sectionY) {
+        int minSectionY = Math.floorDiv(worldBootstrapMinY, 16);
+        int maxSectionY = Math.floorDiv(worldBootstrapMinY + worldBootstrapHeight - 1, 16);
+        if (worldSectionPending || playerAdmission == null || worldBootstrapDimension == null
+                || subscriptionId != worldSubscriptionId || revision != worldBootstrapRevision
+                || Math.abs((long) chunkX - worldBootstrapCenterChunkX) > WORLD_BOOTSTRAP_RADIUS
+                || Math.abs((long) chunkZ - worldBootstrapCenterChunkZ) > WORLD_BOOTSTRAP_RADIUS
+                || sectionY < minSectionY || sectionY > maxSectionY) {
+            stop(ctx, "World section unavailable");
+            return;
+        }
+        worldSectionPending = true;
+        var expectedSession = playSession;
+        var expectedAdmission = playerAdmission;
+        int expectedSubscriptionId = worldSubscriptionId;
+        int expectedRevision = worldBootstrapRevision;
+        String expectedDimension = worldBootstrapDimension;
+        playerAdmissions.section(expectedAdmission, chunkX, chunkZ, sectionY).whenComplete((snapshot, failure) -> {
+            try {
+                ctx.executor().execute(() -> finishWorldSection(ctx, requestSequence, expectedSession, expectedAdmission,
+                        expectedSubscriptionId, expectedRevision, expectedDimension, chunkX, chunkZ, sectionY,
+                        snapshot, failure));
+            } catch (RejectedExecutionException ignored) { }
+        });
+    }
+
+    private void finishWorldSection(ChannelHandlerContext ctx, long requestSequence,
+                                    ObserverPlaySessionService.Session expectedSession,
+                                    ObserverPlayerAdmissionService.Admission expectedAdmission,
+                                    int expectedSubscriptionId, int expectedRevision, String expectedDimension,
+                                    int chunkX, int chunkZ, int sectionY,
+                                    ObserverPlayerAdmissionService.WorldSection snapshot, Throwable failure) {
+        worldSectionPending = false;
+        if (ended || !ctx.channel().isActive()) return;
+        if (failure != null || snapshot == null || playSession != expectedSession || playerAdmission != expectedAdmission
+                || worldSubscriptionId != expectedSubscriptionId || worldBootstrapRevision != expectedRevision
+                || !Objects.equals(worldBootstrapDimension, expectedDimension)
+                || !expectedDimension.equals(snapshot.dimension()) || snapshot.chunkX() != chunkX
+                || snapshot.chunkZ() != chunkZ || snapshot.sectionY() != sectionY
+                || !accounts.valid(session) || !playSessions.valid(session, expectedSession)
+                || !playerAdmissions.valid(expectedSession, expectedAdmission)) {
+            stop(ctx, "World section unavailable");
+            return;
+        }
+        var registry = ObserverBlockStateRegistry.page(0);
+        int[] stateIds = snapshot.stateIds();
+        for (int part = 0; part < ObserverWorldSectionCodec.PARTS; part++) {
+            String encoded = ObserverWorldSectionCodec.encodePart(stateIds, part);
+            send(ctx, "{\"type\":\"world_section\",\"protocol\":" + ObserverWorldSectionCodec.PROTOCOL
+                    + ",\"seq\":" + requestSequence + ",\"sessionEpoch\":" + expectedSession.epoch()
+                    + ",\"subscriptionId\":" + expectedSubscriptionId + ",\"revision\":" + expectedRevision
+                    + ",\"registryFingerprint\":\"" + registry.fingerprint() + "\""
+                    + ",\"dimension\":\"" + expectedDimension + "\",\"chunkX\":" + chunkX
+                    + ",\"chunkZ\":" + chunkZ + ",\"sectionY\":" + sectionY + ",\"part\":" + part
+                    + ",\"parts\":" + ObserverWorldSectionCodec.PARTS
+                    + ",\"stateCount\":" + ObserverWorldSectionCodec.STATES_PER_PART
+                    + ",\"data\":\"" + encoded + "\"}");
+        }
     }
 
     private void finishLogin(ChannelHandlerContext ctx, String name, boolean success) {
@@ -250,6 +327,7 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
         if (deadline != null) deadline.cancel(false);
         worldStatePending = false;
         worldBootstrapPending = false;
+        worldSectionPending = false;
         if (playerAdmission != null) { playerAdmissions.release(playerAdmission); playerAdmission = null; }
         if (playSession != null) { playSessions.release(playSession); playSession = null; }
         if (session != null) { accounts.release(session); session = null; }
@@ -264,11 +342,19 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
             reader.beginObject();
             while (reader.hasNext()) {
                 String key = reader.nextName();
-                if (!Set.of("type", "username", "password", "seq", "offset").contains(key) || values.containsKey(key) || values.size() >= 3) throw new IllegalArgumentException();
-                if (key.equals("seq") || key.equals("offset")) {
+                if (!Set.of("type", "username", "password", "seq", "offset", "subscriptionId", "revision",
+                        "chunkX", "chunkZ", "sectionY").contains(key) || values.containsKey(key) || values.size() >= 7) {
+                    throw new IllegalArgumentException();
+                }
+                if (Set.of("seq", "offset", "subscriptionId", "revision", "chunkX", "chunkZ", "sectionY").contains(key)) {
                     if (reader.peek() != JsonToken.NUMBER) throw new IllegalArgumentException();
                     String value = reader.nextString();
-                    if (!value.matches("0|[1-9][0-9]{0,8}")) throw new IllegalArgumentException();
+                    boolean valid = switch (key) {
+                        case "chunkX", "chunkZ" -> value.matches("0|-?[1-9][0-9]{0,6}");
+                        case "sectionY" -> value.matches("0|-?[1-9][0-9]{0,3}");
+                        default -> value.matches("0|[1-9][0-9]{0,8}");
+                    };
+                    if (!valid) throw new IllegalArgumentException();
                     values.put(key, value);
                 } else {
                     if (reader.peek() != JsonToken.STRING) throw new IllegalArgumentException();
