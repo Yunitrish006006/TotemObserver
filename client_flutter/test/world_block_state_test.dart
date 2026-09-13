@@ -23,7 +23,10 @@ void main() {
   });
 
   test('air and vanilla fluids use exact classifications', () {
-    final air = WorldBlockStateDescriptor.fromCanonical(5, 'minecraft:cave_air');
+    final air = WorldBlockStateDescriptor.fromCanonical(
+      5,
+      'minecraft:cave_air',
+    );
     final water = WorldBlockStateDescriptor.fromCanonical(
       9,
       'minecraft:water[level=4]',
@@ -38,7 +41,10 @@ void main() {
     );
 
     expect(air.isAir, isTrue);
-    expect(air.classificationConfidence, WorldBlockClassificationConfidence.exact);
+    expect(
+      air.classificationConfidence,
+      WorldBlockClassificationConfidence.exact,
+    );
     expect(water.renderHint, WorldBlockRenderHint.fluid);
     expect(water.fluidKind, WorldBlockFluidKind.water);
     expect(lava.fluidKind, WorldBlockFluidKind.lava);
