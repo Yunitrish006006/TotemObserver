@@ -21,6 +21,7 @@ class SchedulerTestConnection extends ObserverConnection {
 
   final requests = <WorldSectionCoordinate>[];
   final Map<WorldSectionKey, WorldSectionSnapshot> completed = {};
+  final Set<WorldSectionKey> unavailable = {};
 
   @override
   bool get canRequestWorldSections => true;
@@ -38,25 +39,32 @@ class SchedulerTestConnection extends ObserverConnection {
 
   @override
   WorldSectionSnapshot? worldSection(int chunkX, int chunkZ, int sectionY) =>
-      completed[WorldSectionKey(
-        subscriptionId: bootstrapSubscriptionId,
-        revision: bootstrapRevision,
-        chunkX: chunkX,
-        chunkZ: chunkZ,
-        sectionY: sectionY,
-      )];
+      completed[_key(chunkX, chunkZ, sectionY)];
+
+  @override
+  bool worldSectionUnavailable(int chunkX, int chunkZ, int sectionY) =>
+      unavailable.contains(_key(chunkX, chunkZ, sectionY));
+
+  WorldSectionKey _key(int chunkX, int chunkZ, int sectionY) => WorldSectionKey(
+    subscriptionId: bootstrapSubscriptionId,
+    revision: bootstrapRevision,
+    chunkX: chunkX,
+    chunkZ: chunkZ,
+    sectionY: sectionY,
+  );
 
   void complete(WorldSectionCoordinate coordinate) {
-    final key = WorldSectionKey(
-      subscriptionId: bootstrapSubscriptionId,
-      revision: bootstrapRevision,
-      chunkX: coordinate.chunkX,
-      chunkZ: coordinate.chunkZ,
-      sectionY: coordinate.sectionY,
-    );
+    final key = _key(coordinate.chunkX, coordinate.chunkZ, coordinate.sectionY);
     completed[key] = WorldSectionSnapshot(
       key: key,
       stateIds: List<int>.filled(4096, 0),
+    );
+    notifyListeners();
+  }
+
+  void markUnavailable(WorldSectionCoordinate coordinate) {
+    unavailable.add(
+      _key(coordinate.chunkX, coordinate.chunkZ, coordinate.sectionY),
     );
     notifyListeners();
   }
@@ -102,6 +110,27 @@ void main() {
       connection.dispose();
     },
   );
+
+  test('advances after an active section is unavailable', () {
+    final connection = SchedulerTestConnection();
+    final scheduler = WorldSectionScheduler(connection);
+
+    expect(scheduler.enqueueHorizontalWindow(4), 25);
+    final first = connection.requests.single;
+    connection.markUnavailable(first);
+
+    expect(connection.requests, hasLength(2));
+    expect(
+      connection.requests[1],
+      const WorldSectionCoordinate(chunkX: 10, chunkZ: -4, sectionY: 4),
+    );
+    expect(scheduler.queuedCount, 23);
+    expect(scheduler.active, connection.requests[1]);
+    expect(scheduler.enqueue(first), isFalse);
+
+    scheduler.dispose();
+    connection.dispose();
+  });
 
   test('drops queued work when the bootstrap revision changes', () {
     final connection = SchedulerTestConnection();
