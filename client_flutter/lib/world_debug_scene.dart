@@ -56,18 +56,7 @@ abstract final class WorldDebugScene {
     ObserverConnection connection,
     VisibleWorldPlan plan,
   ) {
-    if (connection.phase != ConnectionPhase.connected ||
-        !connection.playerAttached ||
-        !connection.hasWorldRegistry ||
-        !connection.hasWorldState ||
-        !connection.hasWorldBootstrap ||
-        connection.worldDimension != connection.bootstrapDimension ||
-        plan.subscriptionId != connection.bootstrapSubscriptionId ||
-        plan.revision != connection.bootstrapRevision ||
-        plan.anchorSectionY != (connection.worldY / 16).floor() ||
-        plan.targets.length > WorldVisibleViewPolicy.maxTargets) {
-      return const [];
-    }
+    if (!accepts(connection, plan)) return const [];
     final faces = <WorldDebugVoxelFace>[];
     for (final target in plan.targets) {
       final section = connection.worldSection(
@@ -93,6 +82,18 @@ abstract final class WorldDebugScene {
     }
     return List.unmodifiable(faces);
   }
+
+  static bool accepts(ObserverConnection connection, VisibleWorldPlan plan) =>
+      !(connection.phase != ConnectionPhase.connected ||
+          !connection.playerAttached ||
+          !connection.hasWorldRegistry ||
+          !connection.hasWorldState ||
+          !connection.hasWorldBootstrap ||
+          connection.worldDimension != connection.bootstrapDimension ||
+          plan.subscriptionId != connection.bootstrapSubscriptionId ||
+          plan.revision != connection.bootstrapRevision ||
+          plan.anchorSectionY != (connection.worldY / 16).floor() ||
+          plan.targets.length > WorldVisibleViewPolicy.maxTargets);
 
   static Color colorFor(String blockId, WorldVoxelFaceDirection direction) {
     int hash = 0;
@@ -259,7 +260,7 @@ class _Point {
   final double x, y, z;
 }
 
-class WorldDebugSceneView extends StatelessWidget {
+class WorldDebugSceneView extends StatefulWidget {
   const WorldDebugSceneView({
     super.key,
     required this.connection,
@@ -269,8 +270,32 @@ class WorldDebugSceneView extends StatelessWidget {
   final VisibleWorldPlan plan;
 
   @override
+  State<WorldDebugSceneView> createState() => _WorldDebugSceneViewState();
+}
+
+class _WorldDebugSceneViewState extends State<WorldDebugSceneView> {
+  ObserverConnection? _connection;
+  VisibleWorldPlan? _plan;
+  int _geometryRevision = -1;
+  List<WorldDebugVoxelFace> _faces = const [];
+
+  @override
   Widget build(BuildContext context) {
-    final faces = WorldDebugScene.collect(connection, plan);
+    final connection = widget.connection;
+    final plan = widget.plan;
+    if (!WorldDebugScene.accepts(connection, plan)) {
+      _faces = const [];
+      _plan = null;
+    } else if (!identical(_connection, connection) ||
+        !identical(_plan, plan) ||
+        _geometryRevision != connection.worldGeometryRevision) {
+      _faces = WorldDebugScene.collect(connection, plan);
+      _connection = connection;
+      _plan = plan;
+      _geometryRevision = connection.worldGeometryRevision;
+    }
+    final faces = _faces;
+
     final camera = WorldDebugCamera(
       x: connection.worldX,
       y: connection.worldY,

@@ -10,6 +10,12 @@ import 'package:totem_observer_client/world_section_scheduler.dart';
 
 import 'world_debug_slice_test.dart' show DebugSliceTestConnection;
 
+class GenerationConnection extends DebugSliceTestConnection {
+  int generation = 0;
+  @override
+  int get worldGeometryRevision => generation;
+}
+
 WorldDebugVoxelFace face(
   int z, {
   int x = 0,
@@ -147,6 +153,63 @@ void main() {
       connection.dispose();
     },
   );
+
+  testWidgets('mesh reuse respects generation and current world validity', (
+    tester,
+  ) async {
+    final connection = GenerationConnection();
+    connection.addSection(
+      10,
+      -3,
+      4,
+      stateId: 0,
+      specialStateId: 7,
+      specialX: 3,
+      specialZ: 5,
+    );
+    final plan = WorldVisibleViewPolicy.create(connection)!;
+    Future<WorldDebugScenePainter> render() async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: WorldDebugSceneView(connection: connection, plan: plan),
+        ),
+      );
+      return tester
+              .widget<CustomPaint>(
+                find.byKey(const ValueKey('world-debug-scene')),
+              )
+              .painter!
+          as WorldDebugScenePainter;
+    }
+
+    final initial = await render();
+    expect(initial.faces, hasLength(6));
+    connection.worldYaw = 30;
+    final moved = await render();
+    expect(identical(initial.faces, moved.faces), isTrue);
+    expect(moved.camera.yaw, 30);
+    connection.completed.clear();
+    connection.generation++;
+    expect((await render()).faces, isEmpty);
+    connection.addSection(
+      10,
+      -3,
+      4,
+      stateId: 0,
+      specialStateId: 7,
+      specialX: 3,
+      specialZ: 5,
+    );
+    connection.generation++;
+    expect((await render()).faces, hasLength(6));
+    connection.worldDimension = 'minecraft:the_nether';
+    expect((await render()).faces, isEmpty);
+    connection.worldDimension = connection.bootstrapDimension;
+    expect((await render()).faces, hasLength(6));
+    connection.worldY += 16;
+    expect((await render()).faces, isEmpty);
+    connection.dispose();
+  });
 
   testWidgets('partial-cache scene paints and resizes without an exception', (
     tester,
