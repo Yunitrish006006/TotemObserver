@@ -25,6 +25,9 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
     private ObserverPlayerAdmissionService.Admission playerAdmission;
     private boolean selected, pending, ended, worldStatePending, worldBootstrapPending, worldSectionPending;
     private long sequence = -1;
+    private boolean outlinePending;
+    private long lastOutlineNanos;
+    private io.netty.util.concurrent.ScheduledFuture<?> outlineDeadline;
     private boolean movementPending;
     private long lastMovementNanos;
     private boolean blockUsePending, worldRefreshRequired;
@@ -56,6 +59,7 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
                     + ",\"worldSectionProtocol\":" + (playerAdmissions == null ? 0 : ObserverWorldSectionCodec.PROTOCOL)
                     + ",\"worldMovementProtocol\":" + (playerAdmissions == null ? 0 : ObserverMovementRequest.PROTOCOL)
                     + ",\"worldBlockUseProtocol\":" + (playerAdmissions == null ? 0 : ObserverBlockUseRequest.PROTOCOL)
+                    + ",\"worldTargetOutlineProtocol\":" + (playerAdmissions == null ? 0 : ObserverTargetOutlineRequest.PROTOCOL)
                     + ",\"play\":false}");
             deadline = ctx.executor().schedule(() -> stop(ctx, "Login timed out"), 10, TimeUnit.SECONDS);
         } else if (selected && event instanceof IdleStateEvent) stop(ctx, "Connection idle");
@@ -100,6 +104,10 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
                 requestBlockUse(ctx, ObserverBlockUseRequest.from(message));
                 return;
             }
+            if ("world_target_outline".equals(type)) {
+                requestTargetOutline(ctx, ObserverTargetOutlineRequest.from(message));
+                return;
+            }
             boolean ping = "ping".equals(type);
             boolean worldState = "world_state".equals(type) && playerAdmissions != null;
             boolean worldBootstrap = "world_bootstrap".equals(type) && playerAdmissions != null;
@@ -131,7 +139,7 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
     private void requestMovement(ChannelHandlerContext ctx, ObserverMovementRequest request) {
         long now = System.nanoTime();
         if (playerAdmissions == null || playerAdmission == null || movementPending || worldBootstrapPending
-                || blockUsePending || worldRefreshRequired
+                || blockUsePending || outlinePending || worldRefreshRequired
                 || request.seq() <= sequence || request.sessionEpoch() != playSession.epoch()
                 || request.subscriptionId() != worldSubscriptionId || request.revision() != worldBootstrapRevision
                 || !request.dimension().equals(worldBootstrapDimension)
@@ -183,7 +191,7 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
 
     private void requestBlockUse(ChannelHandlerContext ctx, ObserverBlockUseRequest request) {
         long now = System.nanoTime();
-        if (playerAdmissions == null || playerAdmission == null || blockUsePending || movementPending
+        if (playerAdmissions == null || playerAdmission == null || blockUsePending || outlinePending || movementPending
                 || worldBootstrapPending || worldSectionPending || worldRefreshRequired
                 || request.seq() <= sequence || request.sessionEpoch() != playSession.epoch()
                 || request.subscriptionId() != worldSubscriptionId || request.revision() != worldBootstrapRevision
@@ -231,6 +239,45 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
                 });
     }
 
+    private void requestTargetOutline(ChannelHandlerContext ctx, ObserverTargetOutlineRequest request) {
+        long now = System.nanoTime();
+        if (playerAdmissions == null || playerAdmission == null || outlinePending || movementPending || blockUsePending
+                || worldBootstrapPending || worldRefreshRequired || request.seq() <= sequence
+                || request.sessionEpoch() != playSession.epoch() || request.subscriptionId() != worldSubscriptionId
+                || request.revision() != worldBootstrapRevision || !request.dimension().equals(worldBootstrapDimension)
+                || !request.registryFingerprint().equals(ObserverBlockStateRegistry.page(0).fingerprint())
+                || (lastOutlineNanos != 0 && now - lastOutlineNanos < TimeUnit.MILLISECONDS.toNanos(200))) {
+            stop(ctx, "Target outline unavailable"); return;
+        }
+        sequence = request.seq(); lastOutlineNanos = now; outlinePending = true;
+        var expectedAuthentication = session;
+        var expectedSession = playSession;
+        var expectedAdmission = playerAdmission;
+        outlineDeadline = ctx.executor().schedule(() -> stop(ctx, "Target outline timed out"), 5, TimeUnit.SECONDS);
+        playerAdmissions.targetOutline(expectedAdmission, request.dimension(), now,
+                () -> accounts.valid(expectedAuthentication) && playSessions.valid(expectedAuthentication, expectedSession))
+                .whenComplete((result, failure) -> {
+                    try {
+                        ctx.executor().execute(() -> {
+                            outlinePending = false;
+                            if (outlineDeadline != null) outlineDeadline.cancel(false);
+                            if (ended || !ctx.channel().isActive()) return;
+                            if (failure != null || result == null || session != expectedAuthentication
+                                    || playSession != expectedSession || playerAdmission != expectedAdmission
+                                    || !accounts.valid(expectedAuthentication)
+                                    || !playSessions.valid(expectedAuthentication, expectedSession)
+                                    || !playerAdmissions.valid(expectedSession, expectedAdmission)
+                                    || request.subscriptionId() != worldSubscriptionId || request.revision() != worldBootstrapRevision
+                                    || !request.dimension().equals(result.state().dimension())) {
+                                stop(ctx, "Target outline unavailable"); return;
+                            }
+                            try { send(ctx, ObserverTargetOutlineResponse.encode(request, result)); }
+                            catch (RuntimeException invalid) { stop(ctx, "Invalid target outline"); }
+                        });
+                    } catch (RejectedExecutionException ignored) { /* Release owns admission cleanup. */ }
+                });
+    }
+
     private void requestWorldState(ChannelHandlerContext ctx, long requestSequence) {
         if (worldStatePending || playerAdmission == null) { stop(ctx, "World state unavailable"); return; }
         worldStatePending = true;
@@ -263,7 +310,7 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
     }
 
     private void requestWorldBootstrap(ChannelHandlerContext ctx, long requestSequence) {
-        if (worldBootstrapPending || movementPending || blockUsePending || playerAdmission == null) { stop(ctx, "World bootstrap unavailable"); return; }
+        if (worldBootstrapPending || movementPending || blockUsePending || outlinePending || playerAdmission == null) { stop(ctx, "World bootstrap unavailable"); return; }
         worldBootstrapPending = true;
         var expectedSession = playSession;
         var expectedAdmission = playerAdmission;
@@ -322,7 +369,7 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
                                      int chunkX, int chunkZ, int sectionY) {
         int minSectionY = Math.floorDiv(worldBootstrapMinY, 16);
         int maxSectionY = Math.floorDiv(worldBootstrapMinY + worldBootstrapHeight - 1, 16);
-        if (worldSectionPending || blockUsePending || worldRefreshRequired || playerAdmission == null || worldBootstrapDimension == null
+        if (worldSectionPending || blockUsePending || outlinePending || worldRefreshRequired || playerAdmission == null || worldBootstrapDimension == null
                 || subscriptionId != worldSubscriptionId || revision != worldBootstrapRevision
                 || Math.abs((long) chunkX - worldBootstrapCenterChunkX) > WORLD_BOOTSTRAP_RADIUS
                 || Math.abs((long) chunkZ - worldBootstrapCenterChunkZ) > WORLD_BOOTSTRAP_RADIUS
@@ -460,6 +507,7 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
         if (deadline != null) deadline.cancel(false);
         if (movementDeadline != null) movementDeadline.cancel(false);
         if (blockUseDeadline != null) blockUseDeadline.cancel(false);
+        if (outlineDeadline != null) outlineDeadline.cancel(false);
         blockUsePending = false;
         movementPending = false;
         worldStatePending = false;
@@ -482,7 +530,7 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
                 String key = reader.nextName();
                 if (!Set.of("type", "username", "password", "seq", "offset", "subscriptionId", "revision",
                         "chunkX", "chunkZ", "sectionY", "protocol", "sessionEpoch", "dimension",
-                        "strafe", "forward", "yaw", "pitch", "jump").contains(key)
+                        "strafe", "forward", "yaw", "pitch", "jump", "registryFingerprint").contains(key)
                         || values.containsKey(key) || values.size() >= ObserverMovementRequest.KEYS.size()) {
                     throw new IllegalArgumentException();
                 }

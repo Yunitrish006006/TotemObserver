@@ -283,6 +283,31 @@ public final class ObserverPlayerAdmissionService implements AutoCloseable {
         }
     }
 
+    record TargetOutlineResult(WorldState state, double eyeY, int serverTick, ObserverTargetOutline.Snapshot target) {}
+
+    CompletableFuture<TargetOutlineResult> targetOutline(Admission admission, String dimension, long receivedNanos,
+                                                          BooleanSupplier sessionAuthorized) {
+        var result = new CompletableFuture<TargetOutlineResult>();
+        execute(() -> {
+            try {
+                BooleanSupplier authorized = () -> nanoTime.getAsLong() - receivedNanos <= TimeUnit.MILLISECONDS.toNanos(250)
+                        && admission != null && valid(admission.playSession(), admission)
+                        && sessionAuthorized.getAsBoolean()
+                        && dimension.equals(admission.player().level().dimension().identifier().toString());
+                if (!authorized.getAsBoolean()) { result.complete(null); return; }
+                var player = admission.player();
+                var target = ObserverTargetOutline.capture(player, authorized);
+                if (!authorized.getAsBoolean()) { result.complete(null); return; }
+                var state = new WorldState(dimension, player.getX(), player.getY(), player.getZ(),
+                        player.getYRot(), player.getXRot());
+                double eyeY = player.getEyeY();
+                if (!Double.isFinite(eyeY)) throw new IllegalStateException("Invalid outline camera");
+                result.complete(new TargetOutlineResult(state, eyeY, server.getTickCount(), target));
+            } catch (Throwable failure) { result.completeExceptionally(failure); }
+        });
+        return result;
+    }
+
     /** Captures the currently admitted player's location only on the Minecraft server thread. */
     public CompletableFuture<WorldState> snapshot(Admission admission) {
         var result = new CompletableFuture<WorldState>();
