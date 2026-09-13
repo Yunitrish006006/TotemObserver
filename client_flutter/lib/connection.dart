@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
@@ -32,6 +33,79 @@ class SocketTransport implements BridgeTransport {
 
 enum ConnectionPhase { offline, connecting, connected }
 
+@immutable
+class WorldSectionKey {
+  const WorldSectionKey({
+    required this.subscriptionId,
+    required this.revision,
+    required this.chunkX,
+    required this.chunkZ,
+    required this.sectionY,
+  });
+
+  final int subscriptionId;
+  final int revision;
+  final int chunkX;
+  final int chunkZ;
+  final int sectionY;
+
+  @override
+  bool operator ==(Object other) =>
+      other is WorldSectionKey &&
+      subscriptionId == other.subscriptionId &&
+      revision == other.revision &&
+      chunkX == other.chunkX &&
+      chunkZ == other.chunkZ &&
+      sectionY == other.sectionY;
+
+  @override
+  int get hashCode => Object.hash(
+    subscriptionId,
+    revision,
+    chunkX,
+    chunkZ,
+    sectionY,
+  );
+}
+
+@immutable
+class WorldSectionSnapshot {
+  WorldSectionSnapshot({required this.key, required List<int> stateIds})
+    : stateIds = List.unmodifiable(stateIds) {
+    if (this.stateIds.length != 4096) throw const FormatException();
+  }
+
+  final WorldSectionKey key;
+  final List<int> stateIds;
+
+  int stateAt(int localX, int localY, int localZ) {
+    if (localX < 0 ||
+        localX > 15 ||
+        localY < 0 ||
+        localY > 15 ||
+        localZ < 0 ||
+        localZ > 15) {
+      throw RangeError('Section coordinates must be 0..15');
+    }
+    return stateIds[(localY * 16 + localZ) * 16 + localX];
+  }
+}
+
+class _WorldSectionAssembly {
+  _WorldSectionAssembly({
+    required this.sequence,
+    required this.key,
+    required this.dimension,
+    required this.registryFingerprint,
+  });
+
+  final int sequence;
+  final WorldSectionKey key;
+  final String dimension;
+  final String registryFingerprint;
+  final List<List<int>?> parts = List<List<int>?>.filled(4, null);
+}
+
 class ObserverConnection extends ChangeNotifier {
   ObserverConnection({BridgeTransport Function(Uri)? open})
     : _open = open ?? SocketTransport.new;
@@ -46,6 +120,7 @@ class ObserverConnection extends ChangeNotifier {
       _worldStateProtocol = 0,
       _worldBootstrapProtocol = 0,
       _worldRegistryProtocol = 0,
+      _worldSectionProtocol = 0,
       _pendingWorldStateSequence = -1,
       _pendingWorldBootstrapSequence = -1,
       _pendingWorldRegistrySequence = -1,
@@ -53,6 +128,7 @@ class ObserverConnection extends ChangeNotifier {
   String? _login;
   String _expectedAccount = '';
   bool _hello = false, _disposed = false, _playerAdmissionAvailable = false;
+  _WorldSectionAssembly? _pendingWorldSection;
   ConnectionPhase phase = ConnectionPhase.offline;
   String status = '尚未連線';
   String account = '';
@@ -73,6 +149,7 @@ class ObserverConnection extends ChangeNotifier {
   String registryFingerprint = '';
   int registryTotal = 0;
   final Map<int, String> _blockStateNames = {};
+  final Map<WorldSectionKey, WorldSectionSnapshot> _worldSections = {};
   int replies = 0;
 
   bool get hasWorldState => worldDimension.isNotEmpty;
@@ -80,7 +157,22 @@ class ObserverConnection extends ChangeNotifier {
       bootstrapDimension.isNotEmpty && bootstrapSubscriptionId > 0;
   bool get hasWorldRegistry =>
       registryFingerprint.isNotEmpty && registryTotal > 0;
+  bool get canRequestWorldSections =>
+      _worldSectionProtocol == 1 && hasWorldBootstrap && hasWorldRegistry;
   String? blockStateName(int rawId) => _blockStateNames[rawId];
+
+  WorldSectionSnapshot? worldSection(int chunkX, int chunkZ, int sectionY) {
+    if (!hasWorldBootstrap) return null;
+    return _worldSections[
+      WorldSectionKey(
+        subscriptionId: bootstrapSubscriptionId,
+        revision: bootstrapRevision,
+        chunkX: chunkX,
+        chunkZ: chunkZ,
+        sectionY: sectionY,
+      )
+    ];
+  }
 
   Future<void> authenticate(
     String address,
@@ -179,10 +271,21 @@ class ObserverConnection extends ChangeNotifier {
               worldRegistryProtocol != 1) {
             throw const FormatException();
           }
+          final worldSectionProtocol = message['worldSectionProtocol'];
+          if (worldSectionProtocol != null &&
+              worldSectionProtocol != 0 &&
+              worldSectionProtocol != 1) {
+            throw const FormatException();
+          }
           if ((worldStateProtocol == 1 ||
                   worldBootstrapProtocol == 1 ||
-                  worldRegistryProtocol == 1) &&
+                  worldRegistryProtocol == 1 ||
+                  worldSectionProtocol == 1) &&
               (playerAdmission != true || identityProtocol != 1)) {
+            throw const FormatException();
+          }
+          if (worldSectionProtocol == 1 &&
+              (worldBootstrapProtocol != 1 || worldRegistryProtocol != 1)) {
             throw const FormatException();
           }
           _identityProtocol = identityProtocol == 1 ? 1 : 0;
@@ -190,6 +293,7 @@ class ObserverConnection extends ChangeNotifier {
           _worldStateProtocol = worldStateProtocol == 1 ? 1 : 0;
           _worldBootstrapProtocol = worldBootstrapProtocol == 1 ? 1 : 0;
           _worldRegistryProtocol = worldRegistryProtocol == 1 ? 1 : 0;
+          _worldSectionProtocol = worldSectionProtocol == 1 ? 1 : 0;
           _hello = true;
           _transport!.send(_login!);
           _login = null;
@@ -339,6 +443,8 @@ class ObserverConnection extends ChangeNotifier {
             throw const FormatException();
           }
           _pendingWorldBootstrapSequence = -1;
+          _pendingWorldSection = null;
+          _worldSections.clear();
           bootstrapSubscriptionId = subscriptionId;
           bootstrapRevision = revision;
           bootstrapDimension = dimension;
@@ -400,6 +506,64 @@ class ObserverConnection extends ChangeNotifier {
             _blockStateNames[offset + i] = states[i] as String;
           }
           _notify();
+        case 'world_section':
+          final pending = _pendingWorldSection;
+          final seq = message['seq'];
+          final epoch = message['sessionEpoch'];
+          final subscriptionId = message['subscriptionId'];
+          final revision = message['revision'];
+          final fingerprint = message['registryFingerprint'];
+          final dimension = message['dimension'];
+          final chunkX = message['chunkX'];
+          final chunkZ = message['chunkZ'];
+          final sectionY = message['sectionY'];
+          final part = message['part'];
+          final parts = message['parts'];
+          final stateCount = message['stateCount'];
+          final encoded = message['data'];
+          if (phase != ConnectionPhase.connected ||
+              _worldSectionProtocol != 1 ||
+              !playerAttached ||
+              pending == null ||
+              message['protocol'] != 1 ||
+              seq is! int ||
+              seq != pending.sequence ||
+              epoch != sessionEpoch ||
+              subscriptionId != pending.key.subscriptionId ||
+              revision != pending.key.revision ||
+              subscriptionId != bootstrapSubscriptionId ||
+              revision != bootstrapRevision ||
+              fingerprint != pending.registryFingerprint ||
+              fingerprint != registryFingerprint ||
+              dimension != pending.dimension ||
+              dimension != bootstrapDimension ||
+              chunkX != pending.key.chunkX ||
+              chunkZ != pending.key.chunkZ ||
+              sectionY != pending.key.sectionY ||
+              part is! int ||
+              part < 0 ||
+              part >= 4 ||
+              parts != 4 ||
+              stateCount != 1024 ||
+              encoded is! String ||
+              pending.parts[part] != null) {
+            throw const FormatException();
+          }
+          final decoded = _decodeSectionPart(encoded, registryTotal);
+          pending.parts[part] = decoded;
+          if (pending.parts.every((value) => value != null)) {
+            final stateIds = <int>[];
+            for (final values in pending.parts) {
+              stateIds.addAll(values!);
+            }
+            final snapshot = WorldSectionSnapshot(
+              key: pending.key,
+              stateIds: stateIds,
+            );
+            _worldSections[pending.key] = snapshot;
+            _pendingWorldSection = null;
+            _notify();
+          }
         case 'pong':
           final seq = message['seq'];
           if (phase != ConnectionPhase.connected ||
@@ -444,7 +608,8 @@ class ObserverConnection extends ChangeNotifier {
     if (phase != ConnectionPhase.connected ||
         _worldBootstrapProtocol != 1 ||
         !playerAttached ||
-        _pendingWorldBootstrapSequence >= 0) {
+        _pendingWorldBootstrapSequence >= 0 ||
+        _pendingWorldSection != null) {
       return;
     }
     try {
@@ -486,6 +651,57 @@ class ObserverConnection extends ChangeNotifier {
     _requestWorldRegistry((rawId ~/ 8) * 8);
   }
 
+  void requestWorldSection(int chunkX, int chunkZ, int sectionY) {
+    if (!canRequestWorldSections ||
+        phase != ConnectionPhase.connected ||
+        !playerAttached ||
+        _pendingWorldSection != null ||
+        _pendingWorldBootstrapSequence >= 0 ||
+        chunkX < -2000000 ||
+        chunkX > 2000000 ||
+        chunkZ < -2000000 ||
+        chunkZ > 2000000 ||
+        (chunkX - bootstrapCenterChunkX).abs() > bootstrapRadius ||
+        (chunkZ - bootstrapCenterChunkZ).abs() > bootstrapRadius) {
+      return;
+    }
+    final minSectionY = _sectionYForBlockY(bootstrapMinY);
+    final maxSectionY = _sectionYForBlockY(
+      bootstrapMinY + bootstrapHeight - 1,
+    );
+    if (sectionY < minSectionY || sectionY > maxSectionY) return;
+    final key = WorldSectionKey(
+      subscriptionId: bootstrapSubscriptionId,
+      revision: bootstrapRevision,
+      chunkX: chunkX,
+      chunkZ: chunkZ,
+      sectionY: sectionY,
+    );
+    if (_worldSections.containsKey(key)) return;
+    try {
+      final seq = _sequence++;
+      _pendingWorldSection = _WorldSectionAssembly(
+        sequence: seq,
+        key: key,
+        dimension: bootstrapDimension,
+        registryFingerprint: registryFingerprint,
+      );
+      _transport?.send(
+        jsonEncode({
+          'type': 'world_section',
+          'seq': seq,
+          'subscriptionId': bootstrapSubscriptionId,
+          'revision': bootstrapRevision,
+          'chunkX': chunkX,
+          'chunkZ': chunkZ,
+          'sectionY': sectionY,
+        }),
+      );
+    } catch (_) {
+      _fail('連線已中斷');
+    }
+  }
+
   void resyncWorld() => _requestWorldBootstrap();
 
   void ping() {
@@ -496,6 +712,50 @@ class ObserverConnection extends ChangeNotifier {
       _fail('連線已中斷');
     }
     _notify();
+  }
+
+  static int _sectionYForBlockY(int y) => y >= 0 ? y ~/ 16 : -((-y + 15) ~/ 16);
+
+  static List<int> _decodeSectionPart(String encoded, int registryTotal) {
+    if (registryTotal <= 0 ||
+        encoded.isEmpty ||
+        encoded.length > 4096 ||
+        encoded.length % 4 != 0 ||
+        !RegExp(r'^[A-Za-z0-9+/]*={0,2}$').hasMatch(encoded)) {
+      throw const FormatException();
+    }
+    final Uint8List bytes;
+    try {
+      bytes = base64Decode(encoded);
+    } catch (_) {
+      throw const FormatException();
+    }
+    final values = <int>[];
+    int cursor = 0;
+    while (cursor < bytes.length) {
+      int value = 0;
+      int shift = 0;
+      int count = 0;
+      int last = 0;
+      while (true) {
+        if (cursor >= bytes.length || count == 3) {
+          throw const FormatException();
+        }
+        final next = bytes[cursor++];
+        last = next & 0x7f;
+        value |= last << shift;
+        count++;
+        if ((next & 0x80) == 0) break;
+        shift += 7;
+      }
+      if ((count > 1 && last == 0) || value < 0 || value >= registryTotal) {
+        throw const FormatException();
+      }
+      values.add(value);
+      if (values.length > 1024) throw const FormatException();
+    }
+    if (values.length != 1024) throw const FormatException();
+    return List.unmodifiable(values);
   }
 
   void _watchResponse() {
@@ -527,11 +787,13 @@ class ObserverConnection extends ChangeNotifier {
     _worldStateProtocol = 0;
     _worldBootstrapProtocol = 0;
     _worldRegistryProtocol = 0;
+    _worldSectionProtocol = 0;
     _playerAdmissionAvailable = false;
     _pendingWorldStateSequence = -1;
     _pendingWorldBootstrapSequence = -1;
     _pendingWorldRegistrySequence = -1;
     _pendingWorldRegistryOffset = -1;
+    _pendingWorldSection = null;
     _sequence = 0;
     _lastPong = -1;
     replies = 0;
@@ -557,6 +819,7 @@ class ObserverConnection extends ChangeNotifier {
     registryFingerprint = '';
     registryTotal = 0;
     _blockStateNames.clear();
+    _worldSections.clear();
     phase = ConnectionPhase.offline;
     status = '尚未連線';
     _notify();
