@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
+
 import 'connection.dart';
+import 'world_section_scheduler.dart';
+import 'world_visible_view.dart';
 
 void main() => runApp(const ObserverApp());
 
@@ -51,13 +54,25 @@ class ConnectionPage extends StatefulWidget {
 class _ConnectionPageState extends State<ConnectionPage> {
   late final ObserverConnection connection =
       widget.connection ?? ObserverConnection();
+  late final WorldSectionScheduler sectionScheduler;
+  late final WorldVisibleViewController visibleWorld;
   final address = TextEditingController(
     text: 'ws://127.0.0.1:25580/observer/bridge',
   );
   final username = TextEditingController();
   final password = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    sectionScheduler = WorldSectionScheduler(connection);
+    visibleWorld = WorldVisibleViewController(connection, sectionScheduler);
+  }
+
   @override
   void dispose() {
+    visibleWorld.dispose();
+    sectionScheduler.dispose();
     address.dispose();
     username.dispose();
     password.dispose();
@@ -169,10 +184,24 @@ class _ConnectionPageState extends State<ConnectionPage> {
                         '已收到 ${connection.replies} 次連線回應',
                         textAlign: TextAlign.center,
                       ),
+                      if (visibleWorld.hasPlan) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          '世界快取：${visibleWorld.resolvedCount}/${visibleWorld.targetCount} '
+                          '（可用 ${visibleWorld.availableCount} / '
+                          '未載入 ${visibleWorld.unavailableCount}）',
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
                       const SizedBox(height: 16),
                       Text(
                         connection.hasWorldState
-                            ? '已取得伺服器權威角色快照；區塊同步、畫面與遊戲操作仍未啟用。'
+                            ? visibleWorld.hasPlan
+                                  ? visibleWorld.resolvedCount ==
+                                            visibleWorld.targetCount
+                                        ? '已建立受限的伺服器權威世界快取；畫面與遊戲操作仍未啟用。'
+                                        : '正在建立受限的伺服器權威世界快取；畫面與遊戲操作仍未啟用。'
+                                  : '已取得伺服器權威角色快照；區塊同步、畫面與遊戲操作仍未啟用。'
                             : connection.playerAttached
                             ? '角色已存在於伺服器世界並使用原版 playerdata；區塊畫面與遊戲操作仍在開發中。'
                             : '已完成帳號與固定玩家身分綁定；進入 Minecraft 世界功能尚在開發中。',
