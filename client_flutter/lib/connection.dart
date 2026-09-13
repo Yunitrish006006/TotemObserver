@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'outbound_frame_pacer.dart';
+import 'world_target_outline.dart';
 
 import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
@@ -111,6 +112,29 @@ class ObserverConnection extends ChangeNotifier {
   StreamSubscription<dynamic>? _subscription;
   Timer? _deadline, _heartbeat, _responseDeadline;
   Timer? _movementDeadline, _movementCooldown, _registryDeadline;
+  Timer? _outlineDeadline, _outlineCooldown, _outlineExpiry;
+  final _outlineClock = Stopwatch();
+  int _outlineProtocol = 0, _pendingOutlineSequence = -1, _outlineGeometry = -1;
+  WorldTargetOutlineSnapshot? _outline;
+  bool get outlinePending => _pendingOutlineSequence >= 0;
+  bool get canRequestTargetOutline =>
+      canMove && hasWorldRegistry && _outlineProtocol == 1;
+  WorldTargetOutlineSnapshot? get targetOutline {
+    final value = _outline;
+    if (value == null ||
+        !canRequestTargetOutline ||
+        worldWindowRefreshing ||
+        _outlineClock.elapsedMilliseconds >= 500 ||
+        _outlineGeometry != worldGeometryRevision ||
+        value.x != worldX ||
+        value.y != worldY ||
+        value.z != worldZ ||
+        value.yaw != worldYaw ||
+        value.pitch != worldPitch)
+      return null;
+    return value;
+  }
+
   Timer? _blockUseDeadline, _blockUseCooldown;
   Timer? _blockUsePreparation;
   final _blockUsePreparationClock = Stopwatch();
@@ -131,6 +155,7 @@ class ObserverConnection extends ChangeNotifier {
   bool get canSendWorldSectionNow =>
       !blockUsePreparing &&
       !blockUsePending &&
+      !outlinePending &&
       !(_sectionCooldown?.isActive ?? false) &&
       !worldWindowRefreshing &&
       _pendingWorldSection == null;
@@ -401,6 +426,21 @@ class ObserverConnection extends ChangeNotifier {
             throw const FormatException();
           }
           _worldBlockUseProtocol = blockUseProtocol == 1 ? 1 : 0;
+          final outlineProtocol = message['worldTargetOutlineProtocol'];
+          if (outlineProtocol != null &&
+              (outlineProtocol is! int ||
+                  (outlineProtocol != 0 && outlineProtocol != 1))) {
+            throw const FormatException();
+          }
+          if (outlineProtocol == 1 &&
+              (playerAdmission != true ||
+                  identityProtocol != 1 ||
+                  worldMovementProtocol != 1 ||
+                  worldBootstrapProtocol != 1 ||
+                  worldRegistryProtocol != 1)) {
+            throw const FormatException();
+          }
+          _outlineProtocol = outlineProtocol == 1 ? 1 : 0;
           final worldSectionProtocol = message['worldSectionProtocol'];
           if (worldSectionProtocol != null &&
               worldSectionProtocol != 0 &&
@@ -477,6 +517,45 @@ class ObserverConnection extends ChangeNotifier {
           }
           if (_worldStateProtocol == 1 && playerAttached) _requestWorldState();
           ping();
+        case 'world_target_outline':
+          if (!canRequestTargetOutline || !outlinePending)
+            throw const FormatException();
+          final outline = WorldTargetOutlineSnapshot.parse(
+            message,
+            registryTotal: registryTotal,
+          );
+          if (outline.seq != _pendingOutlineSequence ||
+              outline.sessionEpoch != sessionEpoch ||
+              outline.subscriptionId != bootstrapSubscriptionId ||
+              outline.revision != bootstrapRevision ||
+              outline.dimension != bootstrapDimension ||
+              outline.registryFingerprint != registryFingerprint ||
+              outline.serverTick < _lastMovementServerTick)
+            throw const FormatException();
+          final target = outline.target;
+          if (target != null &&
+              (target.y < bootstrapMinY ||
+                  target.y >= bootstrapMinY + bootstrapHeight ||
+                  (target.x - outline.x).abs() > 8 ||
+                  (target.z - outline.z).abs() > 8 ||
+                  (target.y - outline.eyeY).abs() > 8))
+            throw const FormatException();
+          _pendingOutlineSequence = -1;
+          _outlineDeadline?.cancel();
+          if (_outlineGeometry == worldGeometryRevision &&
+              !worldWindowRefreshing &&
+              target != null) {
+            _outline = outline;
+            _outlineClock
+              ..reset()
+              ..start();
+            _outlineExpiry = Timer(const Duration(milliseconds: 500), () {
+              clearTargetOutline();
+              _notify();
+            });
+          }
+          _tryRefreshWorldWindow();
+          _notify();
         case 'world_block_use':
           const keys = {
             'type',
@@ -906,10 +985,60 @@ class ObserverConnection extends ChangeNotifier {
     }
   }
 
+  /// One immediate, read-only capture; callers own polling and rendering owns no requests.
+  bool requestTargetOutline() {
+    if (!canRequestTargetOutline ||
+        outlinePending ||
+        movementPending ||
+        blockUsePending ||
+        blockUsePreparing ||
+        worldWindowRefreshing ||
+        (_outlineCooldown?.isActive ?? false) ||
+        !(_pacer?.canSendImmediately ?? false))
+      return false;
+    try {
+      clearTargetOutline();
+      _outlineGeometry = worldGeometryRevision;
+      final seq = _sequence++;
+      _pendingOutlineSequence = seq;
+      _outlineCooldown = Timer(const Duration(milliseconds: 250), _notify);
+      _outlineDeadline = Timer(
+        const Duration(seconds: 5),
+        () => _fail('目標回應逾時，連線已結束'),
+      );
+      _pacer!.send(
+        jsonEncode({
+          'type': 'world_target_outline',
+          'protocol': 1,
+          'seq': seq,
+          'sessionEpoch': sessionEpoch,
+          'subscriptionId': bootstrapSubscriptionId,
+          'revision': bootstrapRevision,
+          'dimension': bootstrapDimension,
+          'registryFingerprint': registryFingerprint,
+        }),
+      );
+      _notify();
+      return true;
+    } catch (_) {
+      _fail('連線已中斷');
+      return false;
+    }
+  }
+
+  /// Clears display ownership without cancelling an already-sent wire request.
+  void clearTargetOutline() {
+    _outline = null;
+    _outlineGeometry = -1;
+    _outlineExpiry?.cancel();
+    _outlineClock.stop();
+  }
+
   /// Sends an immediate use intent only after previous world work has drained.
   /// Callers own input/focus; false means no action was queued or sent.
   bool sendBlockUse() {
     if (!canUseBlock ||
+        outlinePending ||
         blockUsePending ||
         movementPending ||
         worldWindowRefreshing ||
@@ -919,6 +1048,7 @@ class ObserverConnection extends ChangeNotifier {
       return false;
     try {
       final seq = _sequence++;
+      clearTargetOutline();
       _pendingBlockUseSequence = seq;
       lastBlockUseOutcome = null;
       _blockUseCooldown = Timer(const Duration(milliseconds: 220), _notify);
@@ -949,6 +1079,7 @@ class ObserverConnection extends ChangeNotifier {
   /// prior work. This lease expires even if the input owner stops sampling.
   bool prepareBlockUse() {
     if (!canUseBlock ||
+        outlinePending ||
         blockUsePending ||
         blockUsePreparing ||
         worldWindowRefreshing)
@@ -976,6 +1107,7 @@ class ObserverConnection extends ChangeNotifier {
     required bool jump,
   }) {
     if (!canMove ||
+        outlinePending ||
         blockUsePending ||
         _worldWindowRefreshNeeded ||
         !(_pacer?.canSendImmediately ?? false) ||
@@ -993,6 +1125,7 @@ class ObserverConnection extends ChangeNotifier {
     final wrappedYaw = ((yaw + 180) % 360) - 180;
     try {
       final seq = _sequence++;
+      clearTargetOutline();
       _pendingMovementSequence = seq;
       _movementCooldown = Timer(const Duration(milliseconds: 100), () {});
       _movementDeadline = Timer(
@@ -1043,6 +1176,7 @@ class ObserverConnection extends ChangeNotifier {
         _worldBootstrapProtocol != 1 ||
         !playerAttached ||
         _pendingWorldBootstrapSequence >= 0 ||
+        outlinePending ||
         blockUsePending ||
         movementPending ||
         _pendingWorldSection != null) {
@@ -1050,6 +1184,7 @@ class ObserverConnection extends ChangeNotifier {
     }
     try {
       final seq = _sequence++;
+      clearTargetOutline();
       _pendingWorldBootstrapSequence = seq;
       _bootstrapDeadline = Timer(
         const Duration(seconds: 5),
@@ -1232,6 +1367,11 @@ class ObserverConnection extends ChangeNotifier {
     _generation++;
     _worldGeometryRevision++;
     _movementDeadline?.cancel();
+    clearTargetOutline();
+    _outlineDeadline?.cancel();
+    _outlineCooldown?.cancel();
+    _pendingOutlineSequence = -1;
+    _outlineProtocol = 0;
     _blockUseDeadline?.cancel();
     cancelBlockUsePreparation();
     _blockUseCooldown?.cancel();
