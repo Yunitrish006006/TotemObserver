@@ -21,5 +21,6 @@ jobs:
       - name: Show exact formatter diff
         working-directory: client_flutter
         run: |
+          flutter pub get --enforce-lockfile
           dart format test/world_section_test.dart
           git diff -- test/world_section_test.dart
