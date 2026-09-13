@@ -9,7 +9,7 @@ Each raw block-state ID receives a small bit field:
 - bit `0` (`VISUAL_AIR`) — the authoritative Minecraft `BlockState` reports `isAir()`
 - bit `1` (`VISUAL_CAN_OCCLUDE`) — the authoritative Minecraft `BlockState` reports `canOcclude()`
 
-The flags are stored in the same raw-ID order as `Block.BLOCK_STATE_REGISTRY` and are paged with the same page boundaries as canonical block-state names.
+The flags are independent facts and are stored in the same raw-ID order as `Block.BLOCK_STATE_REGISTRY`, using the same page boundaries as canonical block-state names. Observer does not impose a relationship between the two bits beyond preserving Minecraft's authoritative values.
 
 ## Important semantics
 
@@ -19,8 +19,8 @@ The existing registry fingerprint continues to hash canonical state names only. 
 
 ## Validation
 
-Unit coverage walks the complete block-state registry and verifies that every paged visual flag matches the corresponding authoritative `BlockState.isAir()` and `BlockState.canOcclude()` values, that air and occluding states are both present, and that no state is simultaneously marked air and occluding.
+Because Minecraft's static block-state registry is not initialized in the plain JVM unit-test environment, validation runs as a dedicated Fabric GameTest after Minecraft bootstrap. The GameTest walks the complete block-state registry and verifies both flag bits independently against the corresponding authoritative `BlockState.isAir()` and `BlockState.canOcclude()` values, checks page/fingerprint consistency, and confirms that air and occluding states are present.
 
 ## Next slice
 
-The next slice may extend `world_registry` pages with these visual flags in a backwards-compatible field and teach Flutter to cache them. Only after the client has server-derived shape/render metadata should Observer attempt safe voxel meshing.
+The next slice may extend `world_registry` pages with these visual flags in a backwards-compatible field and teach Flutter to cache them. Only after the client has server-derived shape/render metadata should Observer treat any state as eligible for safe voxel meshing.
