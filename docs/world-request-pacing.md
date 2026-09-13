@@ -16,7 +16,10 @@ Sequence order is FIFO across all operations, with no priority reordering.
 Movement additionally requires an immediately available token and an empty
 queue; old movement intent is never queued behind world data. The input owner
 must retry current intent on its next sample, subject to the connection's own
-100 ms movement cooldown and one-pending-request limit. Request deadlines
+100 ms movement cooldown and one-pending-request limit. The input integration
+also spaces section and registry requests by 300 ms each when movement is
+negotiated, preventing continuous background load from starving immediate input.
+Request deadlines
 continue to include queue delay.
 
 Disconnect drops pending writes and cancels refill. Logout is best effort;
