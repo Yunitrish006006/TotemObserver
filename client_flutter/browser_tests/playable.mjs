@@ -189,8 +189,9 @@ try {
   await waitFor(async()=> (await state()).z>18,'cross chunk boundary');
   await page.keyboard.up('w');
   await waitFor(()=>bootstraps.some(b=>b.centerChunkZ>=1),'moving authoritative window');
+  const beforeLookSequence=corrections.at(-1).seq;
   await page.mouse.move(500,400); await page.mouse.move(530,620);
-  await waitFor(()=>corrections.some(c=>Math.abs(c.yaw)>1),'mouse look acknowledged');
+  await waitFor(()=>corrections.some(c=>c.seq>beforeLookSequence && Math.abs(c.yaw)>1),'new mouse look acknowledged');
   await page.keyboard.press('Escape');
   await page.waitForFunction(()=>document.pointerLockElement===null);
   await waitFor(()=>requests.at(-1)?.forward===0 && requests.at(-1)?.strafe===0,'release input');
