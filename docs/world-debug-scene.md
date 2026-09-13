@@ -7,8 +7,8 @@ owner. No protocol or capability changes; play remains false.
 The camera uses server world_state feet XYZ plus a provisional standing eye
 offset of 1.62, and Minecraft yaw/pitch (yaw zero south, positive pitch down).
 Vertical FOV is 70 degrees, near clip 0.08 blocks, far clip 64 blocks. Viewport
-aspect follows Flutter layout. Mouse/keyboard movement and pose-specific eye
-height belong to later versioned server gameplay slices.
+aspect follows Flutter layout. Mouse/keyboard input now belongs to the separate [input owner](world-first-person-input.md)
+and versioned movement protocol. Pose-specific eye height remains future work.
 
 ## Rendering and bounds
 

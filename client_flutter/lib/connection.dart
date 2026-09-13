@@ -107,7 +107,9 @@ class ObserverConnection extends ChangeNotifier {
   BridgeTransport? _transport;
   StreamSubscription<dynamic>? _subscription;
   Timer? _deadline, _heartbeat, _responseDeadline;
-  Timer? _movementDeadline, _movementCooldown;
+  Timer? _movementDeadline, _movementCooldown, _registryDeadline;
+  Timer? _sectionCooldown, _registryCooldown;
+  bool get canSendWorldSectionNow => !(_sectionCooldown?.isActive ?? false);
   int _worldMovementProtocol = 0, _pendingMovementSequence = -1;
   int _lastMovementServerTick = -1, _worldGeometryRevision = 0;
   int get worldGeometryRevision => _worldGeometryRevision;
@@ -600,6 +602,8 @@ class ObserverConnection extends ChangeNotifier {
               total != registryTotal) {
             throw const FormatException();
           }
+          _registryDeadline?.cancel();
+          _registryDeadline = null;
           _pendingWorldRegistrySequence = -1;
           _pendingWorldRegistryOffset = -1;
           _worldGeometryRevision++;
@@ -822,6 +826,7 @@ class ObserverConnection extends ChangeNotifier {
         _worldRegistryProtocol != 1 ||
         !playerAttached ||
         offset < 0 ||
+        (_registryCooldown?.isActive ?? false) ||
         _pendingWorldRegistrySequence >= 0) {
       return;
     }
@@ -829,6 +834,13 @@ class ObserverConnection extends ChangeNotifier {
       final seq = _sequence++;
       _pendingWorldRegistrySequence = seq;
       _pendingWorldRegistryOffset = offset;
+      if (_worldMovementProtocol == 1) {
+        _registryCooldown = Timer(const Duration(milliseconds: 300), () {});
+      }
+      _registryDeadline = Timer(
+        const Duration(seconds: 5),
+        () => _fail('方塊資料回應逾時，連線已結束'),
+      );
       _transport?.send(
         jsonEncode({'type': 'world_registry', 'seq': seq, 'offset': offset}),
       );
@@ -849,6 +861,7 @@ class ObserverConnection extends ChangeNotifier {
 
   void requestWorldSection(int chunkX, int chunkZ, int sectionY) {
     if (!canRequestWorldSections ||
+        !canSendWorldSectionNow ||
         phase != ConnectionPhase.connected ||
         !playerAttached ||
         _pendingWorldSection != null ||
@@ -877,6 +890,9 @@ class ObserverConnection extends ChangeNotifier {
     }
     try {
       final seq = _sequence++;
+      if (_worldMovementProtocol == 1) {
+        _sectionCooldown = Timer(const Duration(milliseconds: 300), _notify);
+      }
       _pendingWorldSection = _WorldSectionAssembly(
         sequence: seq,
         key: key,
@@ -972,6 +988,9 @@ class ObserverConnection extends ChangeNotifier {
     _generation++;
     _worldGeometryRevision++;
     _movementDeadline?.cancel();
+    _registryDeadline?.cancel();
+    _registryCooldown?.cancel();
+    _sectionCooldown?.cancel();
     _movementCooldown?.cancel();
     _pendingMovementSequence = -1;
     _lastMovementServerTick = -1;
