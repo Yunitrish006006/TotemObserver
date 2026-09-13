@@ -112,6 +112,11 @@ class ObserverConnection extends ChangeNotifier {
   Timer? _deadline, _heartbeat, _responseDeadline;
   Timer? _movementDeadline, _movementCooldown, _registryDeadline;
   Timer? _blockUseDeadline, _blockUseCooldown;
+  Timer? _blockUsePreparation;
+  final _blockUsePreparationClock = Stopwatch();
+  bool get blockUsePreparing =>
+      (_blockUsePreparation?.isActive ?? false) &&
+      _blockUsePreparationClock.elapsedMilliseconds < 750;
   int _worldBlockUseProtocol = 0, _pendingBlockUseSequence = -1;
   bool get blockUsePending => _pendingBlockUseSequence >= 0;
   bool get canUseBlock => canMove && _worldBlockUseProtocol == 1;
@@ -124,6 +129,7 @@ class ObserverConnection extends ChangeNotifier {
   bool get worldWindowRefreshing =>
       _worldWindowRefreshNeeded || _pendingWorldBootstrapSequence >= 0;
   bool get canSendWorldSectionNow =>
+      !blockUsePreparing &&
       !blockUsePending &&
       !(_sectionCooldown?.isActive ?? false) &&
       !worldWindowRefreshing &&
@@ -939,6 +945,28 @@ class ObserverConnection extends ChangeNotifier {
     }
   }
 
+  /// Input owner briefly pauses new sections while flushing look and draining
+  /// prior work. This lease expires even if the input owner stops sampling.
+  bool prepareBlockUse() {
+    if (!canUseBlock ||
+        blockUsePending ||
+        blockUsePreparing ||
+        worldWindowRefreshing)
+      return false;
+    _blockUsePreparation?.cancel();
+    _blockUsePreparationClock
+      ..reset()
+      ..start();
+    _blockUsePreparation = Timer(const Duration(milliseconds: 750), _notify);
+    return true;
+  }
+
+  void cancelBlockUsePreparation() {
+    _blockUsePreparation?.cancel();
+    _blockUsePreparation = null;
+    _blockUsePreparationClock.stop();
+  }
+
   /// Sends intent only. The response replaces authoritative state; no local XYZ prediction.
   bool sendMovement({
     required int strafe,
@@ -1205,6 +1233,7 @@ class ObserverConnection extends ChangeNotifier {
     _worldGeometryRevision++;
     _movementDeadline?.cancel();
     _blockUseDeadline?.cancel();
+    cancelBlockUsePreparation();
     _blockUseCooldown?.cancel();
     _pendingBlockUseSequence = -1;
     _worldBlockUseProtocol = 0;
