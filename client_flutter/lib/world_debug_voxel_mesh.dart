@@ -86,6 +86,13 @@ abstract final class WorldDebugVoxelMesher {
     'minecraft:mossy_cobblestone',
   };
 
+  /// Shared debug geometry policy, never collision or gameplay evidence.
+  static bool supports(WorldBlockStateDescriptor descriptor) =>
+      descriptor.isKnown &&
+      _debugTerrain.contains(descriptor.blockId) &&
+      !descriptor.waterlogged &&
+      !descriptor.isFluid;
+
   static WorldDebugVoxelMesh buildSection({
     required WorldSectionSnapshot section,
     required WorldSectionKey expectedKey,
@@ -136,9 +143,7 @@ abstract final class WorldDebugVoxelMesher {
             continue;
           }
           if (descriptor.isAir) continue;
-          if (!_debugTerrain.contains(descriptor.blockId) ||
-              descriptor.waterlogged ||
-              descriptor.isFluid) {
+          if (!supports(descriptor)) {
             unsupportedSourceCells++;
             continue;
           }
