@@ -86,3 +86,21 @@ access remains on its thread. A dedicated lifecycle test opens and closes a real
 admission from inside the Fabric tick callback. General server task scheduling
 is insufficient to protect vanilla tickable-list iteration because nested task
 processing may execute queued work before that iteration ends.
+
+## Expiry at the simulation tick
+
+An intent can be fresh when admitted to the motion queue and exceed its 250 ms
+age limit before the next server tick. In that case the driver still performs
+idle physics, but the correction must report `applied:false`. Successful idle
+simulation is not confirmation of the requested direction, jump or look. This
+also prevents a block-use preparation from treating an expired look as applied.
+
+`inputExpiringAfterEnqueueCannotAcknowledgeApplied` uses a package-private monotonic
+clock seam to advance past the deadline between enqueue and tick without stalling
+the server thread. It checks unapplied status, unchanged aim/horizontal position
+and continuing gravity. Production always uses System.nanoTime. The wire test
+retries explicit unapplied corrections at most four times with fresh sequence
+numbers and a 100 ms interval, and still requires real movement and jumping.
+Its bounded enclosure prevents accelerated GameTest ticks from moving the player
+off a small floor while input is still valid. A server-side aim change after
+expiry must survive later idle ticks, so the wall cannot mask stale intent replay.

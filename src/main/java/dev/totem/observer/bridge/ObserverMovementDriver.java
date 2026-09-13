@@ -7,7 +7,7 @@ import java.util.Objects;
 import java.util.function.BooleanSupplier;
 
 /**
- * Internal movement foundation, not yet connected to browser requests.
+ * Internal movement driver for admitted Observer input.
  * The admission owner must invoke at most once per server tick and supply a
  * current authorization check. Vanilla doTick owns gravity, collision and jump.
  */
@@ -54,8 +54,8 @@ final class ObserverMovementDriver {
             player.connection.resetPosition();
             return true;
         } finally {
-            // No latched input survives a call. Future transport must implement
-            // a bounded dead-man window while continuing idle gravity ticks.
+            // No latched input survives a call. Admission owns the bounded
+            // dead-man window and continues idle gravity ticks after expiry.
             player.xxa = 0;
             player.zza = 0;
             player.setJumping(false);
