@@ -109,6 +109,21 @@ Map<String, dynamic> sectionPart(int part, {String? fingerprint}) => {
   'data': encodePart(part),
 };
 
+Map<String, dynamic> unavailableSection() => {
+  'type': 'world_section_unavailable',
+  'protocol': 1,
+  'seq': 3,
+  'sessionEpoch': 42,
+  'subscriptionId': 1,
+  'revision': 1,
+  'registryFingerprint': sectionFingerprint,
+  'dimension': 'minecraft:overworld',
+  'chunkX': 10,
+  'chunkZ': -3,
+  'sectionY': -4,
+  'reason': 'not_loaded',
+};
+
 Future<(ObserverConnection, SectionFakeTransport)> connectSection() async {
   final socket = SectionFakeTransport();
   final connection = ObserverConnection(open: (_) => socket);
@@ -171,6 +186,34 @@ void main() {
     expect(jsonDecode(socket.sent.last), {'type': 'world_bootstrap', 'seq': 4});
     socket.receive(bootstrap(seq: 4, revision: 2));
     expect(connection.worldSection(10, -3, -4), isNull);
+
+    connection.dispose();
+  });
+
+  test('keeps an unavailable loaded-chunk result nonfatal until resync', () async {
+    final (connection, socket) = await connectSection();
+
+    connection.requestWorldSection(10, -3, -4);
+    expect(jsonDecode(socket.sent.last)['seq'], 3);
+    socket.receive(unavailableSection());
+
+    expect(connection.phase, ConnectionPhase.connected);
+    expect(socket.closed, isFalse);
+    expect(connection.worldSection(10, -3, -4), isNull);
+    expect(connection.worldSectionUnavailable(10, -3, -4), isTrue);
+
+    final beforeRetry = socket.sent.length;
+    connection.requestWorldSection(10, -3, -4);
+    expect(
+      socket.sent.length,
+      beforeRetry,
+      reason: 'known-unavailable section must not retry in one revision',
+    );
+
+    connection.resyncWorld();
+    expect(jsonDecode(socket.sent.last), {'type': 'world_bootstrap', 'seq': 4});
+    socket.receive(bootstrap(seq: 4, revision: 2));
+    expect(connection.worldSectionUnavailable(10, -3, -4), isFalse);
 
     connection.dispose();
   });
