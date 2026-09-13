@@ -1,0 +1,175 @@
+// Real Chromium -> production Observer bridge -> dedicated Minecraft ServerPlayer.
+import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
+import { readFile, mkdir, writeFile } from 'node:fs/promises';
+import { existsSync, createWriteStream } from 'node:fs';
+import { resolve, dirname, extname, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { once } from 'node:events';
+import { spawn } from 'node:child_process';
+import { chromium } from 'playwright';
+const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+const root = resolve(repo, 'client_flutter/build/web');
+const evidence = resolve(repo, 'build/browser-playable/results');
+const runDir = resolve(repo, 'build/browser-playable/server');
+// A previous world/account is not valid evidence for a fresh admission. Never delete it implicitly.
+assert.equal(existsSync(evidence) || existsSync(runDir),false,'Archive the previous build/browser-playable directory before running again');
+await mkdir(evidence,{recursive:true}); await mkdir(runDir,{recursive:true});
+await writeFile(resolve(runDir,'eula.txt'),'eula=true\n');
+await writeFile(resolve(runDir,'server.properties'),[
+  'online-mode=false','server-ip=127.0.0.1','server-port=0','spawn-protection=0',
+  'gamemode=survival','difficulty=peaceful','view-distance=2','simulation-distance=2',
+  'max-players=2','level-type=minecraft:flat',
+  'generator-settings={"layers":[{"block":"minecraft:bedrock","height":1}],"biome":"minecraft:plains"}',
+  'generate-structures=false','enable-status=false','sync-chunk-writes=false',''
+].join('\n'));
+const http = createServer(async (req, res) => {
+  try {
+    const path = new URL(req.url, 'http://localhost').pathname;
+    const file = resolve(root, '.' + (path === '/' ? '/index.html' : decodeURIComponent(path)));
+    if (!file.startsWith(root + sep)) { res.writeHead(403).end(); return; }
+    res.setHeader('Content-Type', ({'.html':'text/html','.js':'text/javascript','.wasm':'application/wasm','.json':'application/json'})[extname(file)] ?? 'application/octet-stream');
+    res.end(await readFile(file));
+  } catch { res.writeHead(404).end(); }
+});
+http.listen(0, '127.0.0.1'); await once(http, 'listening');
+const args = ['--project-cache-dir','build/browser-playable/gradle',
+  `-PbrowserOrigin=http://127.0.0.1:${http.address().port}`];
+if (process.env.TOTEM_CORE_JAR) args.push(`-PtotemCoreJar=${process.env.TOTEM_CORE_JAR}`);
+args.push('runBrowserFixtureServer','--no-daemon','--console=plain');
+const log = createWriteStream(resolve(evidence,'server.log'));
+const server = spawn('./gradlew',args,{cwd:repo,detached:true,stdio:['ignore','pipe','pipe']});
+server.stdout.pipe(log,{end:false}); server.stderr.pipe(log,{end:false});
+let exited = false; let spawnError;
+server.on('exit',()=>{exited=true;}); server.on('error',error=>{spawnError=error;exited=true;});
+let browser, page;
+async function waitFor(check,label,timeout=15000) {
+  const end=Date.now()+timeout;
+  while (Date.now()<end) {
+    if (spawnError) throw spawnError;
+    if (exited) throw new Error(`Minecraft exited during ${label}; inspect server.log`);
+    if (await check()) return;
+    await new Promise(resolve=>setTimeout(resolve,50));
+  }
+  throw new Error(`Timed out: ${label}`);
+}
+async function state() {
+  try {return JSON.parse(await readFile(resolve(evidence,'state.json'),'utf8'));}
+  catch (error) {if(error.code==='ENOENT') return {}; throw error;}
+}
+try {
+  await waitFor(()=>existsSync(resolve(evidence,'ready.json')),'Minecraft bridge startup',180000);
+  const ready=JSON.parse(await readFile(resolve(evidence,'ready.json'),'utf8'));
+  browser=await chromium.launch({headless:true,args:['--no-sandbox'],
+    executablePath:process.env.CHROME_BIN || (existsSync('/usr/bin/chromium')?'/usr/bin/chromium':undefined)});
+  page=await browser.newPage({viewport:{width:1100,height:1100}});
+  const errors=[], corrections=[], bootstraps=[], requests=[];
+  let sections=0; const floorParts=new Map();
+  page.on('pageerror',()=>errors.push('runtime error'));
+  // Passive observation only: no routing, mocked response, or injected input protocol.
+  page.on('websocket',socket=>{
+    socket.on('framereceived',event=>{
+      const message=JSON.parse(event.payload.toString());
+      if(message.type==='world_movement') corrections.push(message);
+      if(message.type==='world_bootstrap') bootstraps.push(message);
+      if(message.type==='world_section') {
+        sections++;
+        if(message.sectionY===3) {
+          const key=`${message.revision}:${message.chunkX}:${message.chunkZ}`;
+          if(!floorParts.has(key)) floorParts.set(key,new Set());
+          floorParts.get(key).add(message.part);
+        }
+      }
+      assert.ok(corrections.length<2000 && bootstraps.length<30,'Bounded smoke capture');
+    });
+    socket.on('framesent',event=>{
+      const message=JSON.parse(event.payload.toString());
+      if(message.type==='world_movement') {
+        assert.equal(Object.hasOwn(message,'x'),false);
+        assert.equal(Object.hasOwn(message,'y'),false);
+        assert.equal(Object.hasOwn(message,'z'),false);
+        requests.push(message);
+      }
+    });
+  });
+  await page.goto(`http://127.0.0.1:${http.address().port}`,{waitUntil:'networkidle'});
+  await page.waitForFunction(()=>document.querySelector('flt-semantics-placeholder')||document.querySelector('flt-semantics'));
+  await page.evaluate(()=>document.querySelector('flt-semantics-placeholder')?.click());
+  async function fill(name,value) {
+    const field = page.getByRole('textbox',{name:new RegExp(name)});
+    await field.waitFor();
+    for (let attempt=0;attempt<4;attempt++) {
+      await page.evaluate(() => document.activeElement?.blur());
+      await field.click();
+      try {
+        await page.waitForFunction(() => document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLTextAreaElement,null,{timeout:2500});
+        await page.keyboard.press('ControlOrMeta+A'); await page.keyboard.insertText(value);
+        await page.waitForFunction(expected => document.activeElement?.value === expected,value,{timeout:2500});
+        await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+        return;
+      } catch { if (attempt===3) throw new Error('Flutter field activation failed'); }
+    }
+  }
+  await fill('伺服器位址',`ws://127.0.0.1:${ready.port}/observer/bridge`);
+  await fill('帳號','playable_smoke'); await fill('密碼','isolated-browser-test-password');
+  await page.getByRole('button',{name:'建立帳號',exact:true}).click();
+  const activate=page.getByRole('button',{name:'點擊操作世界',exact:true});
+  await activate.waitFor({timeout:30000});
+  await waitFor(async()=> (await state()).players===1,'real player admission');
+  const initial=await state();
+  assert.ok(Math.abs(initial.x-8.5)<1 && Math.abs(initial.z-8.5)<1,'Deterministic vanilla spawn');
+  await waitFor(()=>floorParts.get('1:0:0')?.size===4,'complete below-player floor section',30000);
+  // Give the independent registry hydrator time to resolve the floor's canonical state.
+  // The screenshot is reviewed as rendered evidence; snapshot arrival alone does not prove visibility.
+  await page.waitForTimeout(1500);
+  await page.screenshot({path:resolve(evidence,'terrain.png')});
+  await activate.click();
+  await page.waitForFunction(()=>document.pointerLockElement!==null);
+  await page.waitForFunction(()=>[...document.querySelectorAll('[aria-label]')].some(node=>node.getAttribute('aria-label')?.includes('WASD')) || document.body.textContent.includes('WASD'));
+  await page.keyboard.down('w');
+  await waitFor(async()=> (await state()).z>13.5,'walk to wall');
+  await page.waitForTimeout(700);
+  const wall=await state(); assert.ok(wall.z<13.71,'Vanilla collision must stop at the wall');
+  await page.keyboard.down('Space');
+  await waitFor(async()=> (await state()).y>64.5,'real jump');
+  const jumped=await state(); await page.keyboard.up('Space'); await page.keyboard.up('w');
+  await waitFor(async()=> (await state()).onGround,'landing');
+  // Vanilla yaw zero faces south; A moves east, around the wall end at x=16.
+  await page.keyboard.down('a');
+  await waitFor(async()=> (await state()).x>17,'strafe around wall');
+  await page.keyboard.up('a'); await page.keyboard.down('w');
+  await waitFor(async()=> (await state()).z>18,'cross chunk boundary');
+  await page.keyboard.up('w');
+  await waitFor(()=>bootstraps.some(b=>b.centerChunkZ>=1),'moving authoritative window');
+  await page.mouse.move(500,400); await page.mouse.move(530,620);
+  await waitFor(()=>corrections.some(c=>Math.abs(c.yaw)>1),'mouse look acknowledged');
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(()=>document.pointerLockElement===null);
+  await waitFor(()=>requests.at(-1)?.forward===0 && requests.at(-1)?.strafe===0,'release input');
+  await page.waitForTimeout(500);
+  const final=await state();
+  await waitFor(()=>corrections.some(c=>Math.abs(c.x-final.x)<0.01 && Math.abs(c.z-final.z)<0.01),'correction matches real server position');
+  const finalBootstrap=bootstraps.at(-1);
+  const finalFloor=`${finalBootstrap.revision}:${Math.floor(final.x/16)}:${Math.floor(final.z/16)}`;
+  await waitFor(()=>floorParts.get(finalFloor)?.size===4,'streamed floor in the new world window',30000);
+  await page.waitForTimeout(1500);
+  await page.screenshot({path:resolve(evidence,'after-movement.png')});
+  await page.getByRole('button',{name:'登出',exact:true}).click();
+  await waitFor(async()=> (await state()).players===0,'logout releases real ServerPlayer');
+  assert.equal(errors.length,0);
+  await writeFile(resolve(evidence,'result.json'),JSON.stringify({passed:true,fixture:ready.fixture,
+    checks:['real-admission','terrain-snapshots','pointer-lock','WASD','wall-collision','jump-land',
+      'mouse-look','authoritative-correction','cross-chunk-window','logout-release'],
+    initial,wall,jumped,final,sectionParts:sections,revisions:bootstraps.map(b=>b.revision)},null,2));
+  console.log('Real browser / Minecraft movement smoke passed');
+} catch(error) {
+  await page?.screenshot({path:resolve(evidence,'failure.png')}).catch(()=>{});
+  throw error;
+} finally {
+  await browser?.close();
+  await writeFile(resolve(evidence,'stop'),'stop\n');
+  const end=Date.now()+15000;
+  while(!exited && Date.now()<end) await new Promise(resolve=>setTimeout(resolve,100));
+  if(!exited) {try {process.kill(-server.pid,'SIGTERM');} catch(error) {if(error.code!=='ESRCH') throw error;}}
+  log.end(); await new Promise(resolve=>http.close(resolve));
+}

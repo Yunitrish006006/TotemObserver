@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "totem-observer-browser-fixture",
+  "version": "1.0.0",
+  "name": "Observer Real Browser Test Fixture",
+  "environment": "server",
+  "entrypoints": {
+    "main": ["dev.totem.observer.bridge.ObserverBrowserFixture"]
+  },
+  "depends": {
+    "fabricloader": "*",
+    "fabric-api": "*",
+    "minecraft": "*",
+    "totem-observer": "*"
+  }
+}

@@ -25,6 +25,10 @@ def observerIntegrationJars = [
 def observerE2eResults = file("${buildDir}/e2e/results").absolutePath
 
 sourceSets {
+    browserFixture {
+        compileClasspath += sourceSets.main.output.classesDirs + configurations.compileClasspath
+        runtimeClasspath += output + sourceSets.main.output + configurations.runtimeClasspath
+    }
     e2e {
         java.setSrcDirs(['src/e2e/java'])
         resources.setSrcDirs(['src/e2e/resources'])
@@ -48,10 +52,20 @@ sourceSets {
 loom {
     mods {
         'totem-observer' { sourceSet sourceSets.main }
+        'totem-observer-browser-fixture' { sourceSet sourceSets.browserFixture }
         'totem-observer-e2e' { sourceSet sourceSets.e2e }
         'totem-observer-integration-gametest' { sourceSet sourceSets.integrationGametest }
     }
     runs {
+        browserFixtureServer {
+            server()
+            configName = 'Observer real browser fixture server'
+            runDir = 'build/browser-playable/server'
+            source = sourceSets.main
+            vmArg '-Dtotem.observer.browserFixture.enabled=true'
+            vmArg "-Dtotem.observer.browserFixture.origin=${providers.gradleProperty('browserOrigin').getOrElse('http://127.0.0.1:8080')}"
+            vmArg "-Dtotem.observer.browserFixture.results=${file('build/browser-playable/results').absolutePath}"
+        }
         e2eServer {
             server()
             configName = 'Observer E2E Server'
@@ -150,6 +164,11 @@ max-players=32
 }
 
 tasks.withType(Test).configureEach { useJUnitPlatform() }
+
+tasks.named('runBrowserFixtureServer').configure {
+    dependsOn(sourceSets.browserFixture.classesTaskName, sourceSets.browserFixture.processResourcesTaskName)
+    classpath(sourceSets.browserFixture.output)
+}
 
 tasks.register('prepareAccountFixture') {
     group = 'verification'
