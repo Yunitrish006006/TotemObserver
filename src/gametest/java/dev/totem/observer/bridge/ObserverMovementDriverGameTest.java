@@ -27,6 +27,14 @@ public final class ObserverMovementDriverGameTest {
         var connection = new Connection(PacketFlow.SERVERBOUND);
         var channel = new EmbeddedChannel(connection);
         server.getPlayerList().placeNewPlayer(connection, player, cookie);
+        var cleaned = new AtomicBoolean();
+        Runnable cleanup = () -> {
+            if (cleaned.compareAndSet(false, true)) {
+                server.getPlayerList().remove(player);
+                channel.finishAndReleaseAll();
+            }
+        };
+        player.connection.handleAcceptPlayerLoad(new net.minecraft.network.protocol.game.ServerboundPlayerLoadedPacket());
         player.setGameMode(GameType.SURVIVAL);
         final BlockPos origin = helper.absolutePos(new BlockPos(0, 1, 0));
         for (int x = 0; x < 3; x++) {
@@ -60,14 +68,14 @@ public final class ObserverMovementDriverGameTest {
                     if (step == 21) require(player.getY() > startY + 0.2, "ServerPlayer did not jump");
                     if (step == 30) authorized.set(false);
                 } catch (Throwable failure) {
-                    server.getPlayerList().remove(player);
-                    channel.finishAndReleaseAll();
+                    cleanup.run();
                     throw failure;
                 }
             });
         }
 
         helper.runAtTickTime(31, () -> {
+          try {
             var before = player.position();
             float yaw = player.getYRot();
             require(!driver.tick(new ObserverMovementIntent(0, 1, 90, 0, true)), "Revoked movement applied");
@@ -80,6 +88,11 @@ public final class ObserverMovementDriverGameTest {
             player.setOnGround(false);
             player.invulnerableTime = 0;
             player.setHealth(player.getMaxHealth());
+            require(player.connection.hasClientLoaded(), "Fixture must finish player load before fall");
+          } catch (Throwable failure) {
+            cleanup.run();
+            throw failure;
+          }
         });
         for (int tick = 32; tick <= 65; tick++) {
             final int step = tick;
@@ -91,11 +104,11 @@ public final class ObserverMovementDriverGameTest {
                         require(player.getHealth() < player.getMaxHealth(), "Landing did not apply fall damage");
                         helper.succeed();
                     }
+                } catch (Throwable failure) {
+                    cleanup.run();
+                    throw failure;
                 } finally {
-                    if (step == 65) {
-                        server.getPlayerList().remove(player);
-                        channel.finishAndReleaseAll();
-                    }
+                    if (step == 65) cleanup.run();
                 }
             });
         }
