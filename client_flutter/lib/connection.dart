@@ -111,8 +111,17 @@ class ObserverConnection extends ChangeNotifier {
   StreamSubscription<dynamic>? _subscription;
   Timer? _deadline, _heartbeat, _responseDeadline;
   Timer? _movementDeadline, _movementCooldown, _registryDeadline;
-  Timer? _sectionCooldown, _registryCooldown;
-  bool get canSendWorldSectionNow => !(_sectionCooldown?.isActive ?? false);
+  Timer? _sectionCooldown,
+      _registryCooldown,
+      _sectionDeadline,
+      _bootstrapDeadline;
+  bool _worldWindowRefreshNeeded = false;
+  bool get worldWindowRefreshing =>
+      _worldWindowRefreshNeeded || _pendingWorldBootstrapSequence >= 0;
+  bool get canSendWorldSectionNow =>
+      !(_sectionCooldown?.isActive ?? false) &&
+      !worldWindowRefreshing &&
+      _pendingWorldSection == null;
   int _worldMovementProtocol = 0, _pendingMovementSequence = -1;
   int _lastMovementServerTick = -1, _worldGeometryRevision = 0;
   int get worldGeometryRevision => _worldGeometryRevision;
@@ -164,6 +173,44 @@ class ObserverConnection extends ChangeNotifier {
   final Map<int, String> _blockStateNames = {};
   final Map<WorldSectionKey, WorldSectionSnapshot> _worldSections = {};
   final Set<WorldSectionKey> _unavailableWorldSections = {};
+  Set<WorldSectionKey>? _wantedWorldSections;
+  static const maxCachedWorldSections = 43;
+  int get cachedWorldEntryCount =>
+      _worldSections.length + _unavailableWorldSections.length;
+
+  void retainWorldSections(Set<WorldSectionKey> keys) {
+    if (keys.length > maxCachedWorldSections ||
+        keys.any(
+          (key) =>
+              key.subscriptionId != bootstrapSubscriptionId ||
+              key.revision != bootstrapRevision,
+        )) {
+      throw ArgumentError('Current bounded world keys required');
+    }
+    _wantedWorldSections = Set.unmodifiable(keys);
+    final before = cachedWorldEntryCount;
+    _worldSections.removeWhere((key, _) => !keys.contains(key));
+    _unavailableWorldSections.removeWhere((key) => !keys.contains(key));
+    if (cachedWorldEntryCount != before) {
+      _worldGeometryRevision++;
+      _notify();
+    }
+  }
+
+  void _boundWorldCache() {
+    while (cachedWorldEntryCount > maxCachedWorldSections) {
+      if (_unavailableWorldSections.isNotEmpty) {
+        _unavailableWorldSections.remove(_unavailableWorldSections.first);
+      } else {
+        _worldSections.remove(_worldSections.keys.first);
+      }
+    }
+  }
+
+  void _tryRefreshWorldWindow() {
+    if (_worldWindowRefreshNeeded) _requestWorldBootstrap();
+  }
+
   int replies = 0;
 
   bool get hasWorldState => worldDimension.isNotEmpty;
@@ -469,6 +516,11 @@ class ObserverConnection extends ChangeNotifier {
           worldZ = z.toDouble();
           worldYaw = yaw.toDouble();
           worldPitch = pitch.toDouble();
+          if ((worldX / 16).floor() != bootstrapCenterChunkX ||
+              (worldZ / 16).floor() != bootstrapCenterChunkZ) {
+            _worldWindowRefreshNeeded = true;
+          }
+          _tryRefreshWorldWindow();
           _notify();
         case 'world_state':
           final seq = message['seq'];
@@ -565,7 +617,10 @@ class ObserverConnection extends ChangeNotifier {
               revision != 1) {
             throw const FormatException();
           }
+          _bootstrapDeadline?.cancel();
           _pendingWorldBootstrapSequence = -1;
+          _worldWindowRefreshNeeded = false;
+          _wantedWorldSections = null;
           _pendingWorldSection = null;
           _worldGeometryRevision++;
           _worldSections.clear();
@@ -695,8 +750,13 @@ class ObserverConnection extends ChangeNotifier {
             );
             _unavailableWorldSections.remove(pending.key);
             _worldGeometryRevision++;
-            _worldSections[pending.key] = snapshot;
+            if (_wantedWorldSections?.contains(pending.key) ?? true) {
+              _worldSections[pending.key] = snapshot;
+              _boundWorldCache();
+            }
+            _sectionDeadline?.cancel();
             _pendingWorldSection = null;
+            _tryRefreshWorldWindow();
             _notify();
           }
         case 'world_section_unavailable':
@@ -737,7 +797,12 @@ class ObserverConnection extends ChangeNotifier {
           _pendingWorldSection = null;
           _worldGeometryRevision++;
           _worldSections.remove(pending.key);
-          _unavailableWorldSections.add(pending.key);
+          if (_wantedWorldSections?.contains(pending.key) ?? true) {
+            _unavailableWorldSections.add(pending.key);
+            _boundWorldCache();
+          }
+          _sectionDeadline?.cancel();
+          _tryRefreshWorldWindow();
           _notify();
         case 'pong':
           final seq = message['seq'];
@@ -772,6 +837,7 @@ class ObserverConnection extends ChangeNotifier {
     required bool jump,
   }) {
     if (!canMove ||
+        _worldWindowRefreshNeeded ||
         !(_pacer?.canSendImmediately ?? false) ||
         movementPending ||
         _pendingWorldBootstrapSequence >= 0 ||
@@ -844,6 +910,10 @@ class ObserverConnection extends ChangeNotifier {
     try {
       final seq = _sequence++;
       _pendingWorldBootstrapSequence = seq;
+      _bootstrapDeadline = Timer(
+        const Duration(seconds: 5),
+        () => _fail('世界視窗回應逾時，連線已結束'),
+      );
       _pacer?.send(jsonEncode({'type': 'world_bootstrap', 'seq': seq}));
     } catch (_) {
       _fail('連線已中斷');
@@ -922,6 +992,10 @@ class ObserverConnection extends ChangeNotifier {
       if (_worldMovementProtocol == 1) {
         _sectionCooldown = Timer(const Duration(milliseconds: 300), _notify);
       }
+      _sectionDeadline = Timer(
+        const Duration(seconds: 5),
+        () => _fail('區塊回應逾時，連線已結束'),
+      );
       _pendingWorldSection = _WorldSectionAssembly(
         sequence: seq,
         key: key,
@@ -1018,6 +1092,10 @@ class ObserverConnection extends ChangeNotifier {
     _worldGeometryRevision++;
     _movementDeadline?.cancel();
     _registryDeadline?.cancel();
+    _sectionDeadline?.cancel();
+    _bootstrapDeadline?.cancel();
+    _worldWindowRefreshNeeded = false;
+    _wantedWorldSections = null;
     _registryCooldown?.cancel();
     _sectionCooldown?.cancel();
     _movementCooldown?.cancel();

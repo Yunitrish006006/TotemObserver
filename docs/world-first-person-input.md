@@ -35,5 +35,5 @@ inactive; native pointer capture is outside this slice.
 Validation covers lock-request versus acquisition, held WASD/jump, server-owned
 camera correction, rebased mouse deltas, capture loss, Esc, disconnect and
 listener disposal. Browser release compilation and formal CI results are
-recorded in the stacked PR. Moving-window streaming and a real server/browser
-playable smoke are still required before claiming the playable milestone.
+recorded in the stacked PR. Moving-window streaming is described in [world-moving-window.md](world-moving-window.md).
+A real server/browser playable smoke is still required before claiming the milestone.
