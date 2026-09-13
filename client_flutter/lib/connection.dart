@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'outbound_frame_pacer.dart';
+
 import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
@@ -105,6 +107,7 @@ class ObserverConnection extends ChangeNotifier {
     : _open = open ?? SocketTransport.new;
   final BridgeTransport Function(Uri) _open;
   BridgeTransport? _transport;
+  OutboundFramePacer? _pacer;
   StreamSubscription<dynamic>? _subscription;
   Timer? _deadline, _heartbeat, _responseDeadline;
   Timer? _movementDeadline, _movementCooldown;
@@ -236,6 +239,10 @@ class ObserverConnection extends ChangeNotifier {
     try {
       final transport = _open(uri);
       _transport = transport;
+      _pacer = OutboundFramePacer(
+        write: transport.send,
+        onError: () => _fail('連線已中斷'),
+      );
       _subscription = transport.messages.listen(
         (data) {
           if (generation == _generation) _receive(data);
@@ -327,7 +334,7 @@ class ObserverConnection extends ChangeNotifier {
           _worldRegistryProtocol = worldRegistryProtocol == 1 ? 1 : 0;
           _worldSectionProtocol = worldSectionProtocol == 1 ? 1 : 0;
           _hello = true;
-          _transport!.send(_login!);
+          _pacer!.send(_login!);
           _login = null;
         case 'authenticated':
           if (!_hello ||
@@ -740,6 +747,7 @@ class ObserverConnection extends ChangeNotifier {
     required bool jump,
   }) {
     if (!canMove ||
+        !(_pacer?.canSendImmediately ?? false) ||
         movementPending ||
         _pendingWorldBootstrapSequence >= 0 ||
         (_movementCooldown?.isActive ?? false))
@@ -760,7 +768,7 @@ class ObserverConnection extends ChangeNotifier {
         const Duration(seconds: 5),
         () => _fail('移動回應逾時，連線已結束'),
       );
-      _transport!.send(
+      _pacer!.send(
         jsonEncode({
           'type': 'world_movement',
           'protocol': 1,
@@ -793,7 +801,7 @@ class ObserverConnection extends ChangeNotifier {
     try {
       final seq = _sequence++;
       _pendingWorldStateSequence = seq;
-      _transport?.send(jsonEncode({'type': 'world_state', 'seq': seq}));
+      _pacer?.send(jsonEncode({'type': 'world_state', 'seq': seq}));
     } catch (_) {
       _fail('連線已中斷');
     }
@@ -811,7 +819,7 @@ class ObserverConnection extends ChangeNotifier {
     try {
       final seq = _sequence++;
       _pendingWorldBootstrapSequence = seq;
-      _transport?.send(jsonEncode({'type': 'world_bootstrap', 'seq': seq}));
+      _pacer?.send(jsonEncode({'type': 'world_bootstrap', 'seq': seq}));
     } catch (_) {
       _fail('連線已中斷');
     }
@@ -829,7 +837,7 @@ class ObserverConnection extends ChangeNotifier {
       final seq = _sequence++;
       _pendingWorldRegistrySequence = seq;
       _pendingWorldRegistryOffset = offset;
-      _transport?.send(
+      _pacer?.send(
         jsonEncode({'type': 'world_registry', 'seq': seq, 'offset': offset}),
       );
     } catch (_) {
@@ -883,7 +891,7 @@ class ObserverConnection extends ChangeNotifier {
         dimension: bootstrapDimension,
         registryFingerprint: registryFingerprint,
       );
-      _transport?.send(
+      _pacer?.send(
         jsonEncode({
           'type': 'world_section',
           'seq': seq,
@@ -904,7 +912,7 @@ class ObserverConnection extends ChangeNotifier {
   void ping() {
     if (phase != ConnectionPhase.connected) return;
     try {
-      _transport?.send(jsonEncode({'type': 'ping', 'seq': _sequence++}));
+      _pacer?.send(jsonEncode({'type': 'ping', 'seq': _sequence++}));
     } catch (_) {
       _fail('連線已中斷');
     }
@@ -966,7 +974,7 @@ class ObserverConnection extends ChangeNotifier {
   void disconnect() {
     if (phase == ConnectionPhase.connected) {
       try {
-        _transport?.send('{"type":"logout"}');
+        _pacer?.send('{"type":"logout"}');
       } catch (_) {}
     }
     _generation++;
@@ -983,6 +991,8 @@ class ObserverConnection extends ChangeNotifier {
     _responseDeadline?.cancel();
     unawaited(_subscription?.cancel());
     _subscription = null;
+    _pacer?.close();
+    _pacer = null;
     _transport?.close();
     _transport = null;
     _login = null;
