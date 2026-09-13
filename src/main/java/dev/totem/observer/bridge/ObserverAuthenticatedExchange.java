@@ -233,17 +233,30 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
                                     ObserverPlayerAdmissionService.WorldSection snapshot, Throwable failure) {
         worldSectionPending = false;
         if (ended || !ctx.channel().isActive()) return;
-        if (failure != null || snapshot == null || playSession != expectedSession || playerAdmission != expectedAdmission
+        if (failure != null || playSession != expectedSession || playerAdmission != expectedAdmission
                 || worldSubscriptionId != expectedSubscriptionId || worldBootstrapRevision != expectedRevision
                 || !Objects.equals(worldBootstrapDimension, expectedDimension)
-                || !expectedDimension.equals(snapshot.dimension()) || snapshot.chunkX() != chunkX
-                || snapshot.chunkZ() != chunkZ || snapshot.sectionY() != sectionY
                 || !accounts.valid(session) || !playSessions.valid(session, expectedSession)
                 || !playerAdmissions.valid(expectedSession, expectedAdmission)) {
             stop(ctx, "World section unavailable");
             return;
         }
         var registry = ObserverBlockStateRegistry.page(0);
+        if (snapshot == null) {
+            send(ctx, "{\"type\":\"world_section_unavailable\",\"protocol\":" + ObserverWorldSectionCodec.PROTOCOL
+                    + ",\"seq\":" + requestSequence + ",\"sessionEpoch\":" + expectedSession.epoch()
+                    + ",\"subscriptionId\":" + expectedSubscriptionId + ",\"revision\":" + expectedRevision
+                    + ",\"registryFingerprint\":\"" + registry.fingerprint() + "\""
+                    + ",\"dimension\":\"" + expectedDimension + "\",\"chunkX\":" + chunkX
+                    + ",\"chunkZ\":" + chunkZ + ",\"sectionY\":" + sectionY
+                    + ",\"reason\":\"not_loaded\"}");
+            return;
+        }
+        if (!expectedDimension.equals(snapshot.dimension()) || snapshot.chunkX() != chunkX
+                || snapshot.chunkZ() != chunkZ || snapshot.sectionY() != sectionY) {
+            stop(ctx, "World section unavailable");
+            return;
+        }
         int[] stateIds = snapshot.stateIds();
         for (int part = 0; part < ObserverWorldSectionCodec.PARTS; part++) {
             String encoded = ObserverWorldSectionCodec.encodePart(stateIds, part);

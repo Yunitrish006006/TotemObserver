@@ -25,9 +25,9 @@ Authenticated `hello` advertises `worldSectionProtocol: 1` only when real Minecr
 
 The request uses the connection-wide strictly increasing `seq`. The requested chunk must be inside the bootstrap radius, `sectionY` must intersect the advertised dimension height, and the subscription/revision must exactly match the server's most recently issued bootstrap. The server never loads or generates a chunk solely to satisfy Observer; only an already-loaded chunk may be sampled.
 
-## Response parts
+## Successful response parts
 
-One request produces exactly four text frames, each carrying 1024 block states:
+One successful request produces exactly four text frames, each carrying 1024 block states:
 
 ```json
 {
@@ -51,6 +51,33 @@ One request produces exactly four text frames, each carrying 1024 block states:
 
 `data` is the concatenation of 1024 canonical unsigned VarInts, then standard padded Base64. Raw state IDs are capped below 1,000,000, therefore every encoded ID occupies at most three bytes and every part's Base64 payload is at most 4096 characters. No WebSocket fragmentation is required.
 
+## Loaded-chunk unavailable response
+
+A request that is otherwise valid can race with Minecraft chunk unloading. If the exact requested chunk is not loaded when the server-thread snapshot executes, the bridge does not force-load or generate it and does not close the authenticated Observer session. Instead it sends one terminal response:
+
+```json
+{
+  "type":"world_section_unavailable",
+  "protocol":1,
+  "seq":7,
+  "sessionEpoch":42,
+  "subscriptionId":1,
+  "revision":2,
+  "registryFingerprint":"64-lowercase-hex-sha256",
+  "dimension":"minecraft:overworld",
+  "chunkX":12,
+  "chunkZ":-4,
+  "sectionY":3,
+  "reason":"not_loaded"
+}
+```
+
+The response is bound to the same request sequence, session epoch, subscription/revision, registry fingerprint, dimension and coordinates as a successful section. `reason` is currently restricted to `not_loaded`. It is valid only when no successful part for that request has been accepted.
+
+The Flutter client may cache this unavailable result only for the exact current subscription/revision. It must not retry that coordinate repeatedly within the same revision. A newer accepted bootstrap revision, a new subscription or disconnect invalidates both successful section snapshots and unavailable markers, so a later world view may try the coordinate again.
+
+Invalid request bounds, stale subscription/revision, concurrent section requests, revoked sessions, mismatched metadata and malformed frames remain protocol errors and fail closed. The nonfatal response is only for an otherwise valid request whose loaded-chunk lookup returns no chunk.
+
 ## Block order
 
 The complete section contains 4096 states in this fixed order:
@@ -68,9 +95,9 @@ A client commits a section snapshot only after all four distinct parts have pass
 - sampling happens on the Minecraft server thread;
 - only the exact requested section is copied;
 - the section is immutable once copied into the response;
-- an accepted newer bootstrap revision invalidates all previously cached section snapshots;
+- an accepted newer bootstrap revision invalidates all previously cached successful and unavailable section results;
 - dimension changes require a new subscription, so old section frames cannot be mixed into the new world;
-- missing/unloaded chunks are reported as unavailable rather than force-loaded/generated.
+- missing/unloaded chunks produce `world_section_unavailable` rather than being force-loaded/generated or terminating the valid session.
 
 ## Non-goals
 

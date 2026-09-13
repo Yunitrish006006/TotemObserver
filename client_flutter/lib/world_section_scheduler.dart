@@ -54,7 +54,7 @@ class WorldSectionScheduler extends ChangeNotifier {
     if (!_eligible(coordinate) ||
         _active == coordinate ||
         _queued.contains(coordinate) ||
-        _hasSnapshot(coordinate) ||
+        _isResolved(coordinate) ||
         _queue.length >= maxQueuedSections) {
       return false;
     }
@@ -128,13 +128,18 @@ class WorldSectionScheduler extends ChangeNotifier {
         coordinate.sectionY <= maxSectionY;
   }
 
-  bool _hasSnapshot(WorldSectionCoordinate coordinate) =>
+  bool _isResolved(WorldSectionCoordinate coordinate) =>
       connection.worldSection(
+            coordinate.chunkX,
+            coordinate.chunkZ,
+            coordinate.sectionY,
+          ) !=
+          null ||
+      connection.worldSectionUnavailable(
         coordinate.chunkX,
         coordinate.chunkZ,
         coordinate.sectionY,
-      ) !=
-      null;
+      );
 
   void _captureContext() {
     _subscriptionId = connection.bootstrapSubscriptionId;
@@ -159,7 +164,7 @@ class WorldSectionScheduler extends ChangeNotifier {
     }
 
     final active = _active;
-    if (active != null && _hasSnapshot(active)) {
+    if (active != null && _isResolved(active)) {
       _active = null;
       _pump();
       _notify();
@@ -176,7 +181,7 @@ class WorldSectionScheduler extends ChangeNotifier {
     while (_queue.isNotEmpty) {
       final next = _queue.removeAt(0);
       _queued.remove(next);
-      if (!_eligible(next) || _hasSnapshot(next)) continue;
+      if (!_eligible(next) || _isResolved(next)) continue;
       _active = next;
       connection.requestWorldSection(next.chunkX, next.chunkZ, next.sectionY);
       return;
