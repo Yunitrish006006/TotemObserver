@@ -1,0 +1,210 @@
+package dev.totem.observer.bridge;
+
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import net.fabricmc.fabric.api.gametest.v1.GameTest;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.network.protocol.game.ServerboundPlayerLoadedPacket;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.GameType;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.LeverBlock;
+import net.minecraft.world.level.block.state.properties.AttachFace;
+
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.WebSocket;
+import java.nio.file.Files;
+import java.util.UUID;
+import java.util.concurrent.*;
+
+/** Real wire mutation, refresh barrier and hostile binding validation. */
+public final class ObserverBlockUseProtocolGameTest {
+    @GameTest(maxTicks = 100_000)
+    public void authenticatedUseRequiresRefreshAndRejectsHostileRequests(GameTestHelper helper) {
+        var server = helper.getLevel().getServer();
+        var pos = helper.absolutePos(new BlockPos(1, 2, 1));
+        var result = CompletableFuture.runAsync(() -> {
+            java.nio.file.Path directory = null;
+            try {
+                directory = Files.createTempDirectory("observer-block-use-wire-");
+                var accounts = new ObserverAccountService(new ObserverAccountStore(directory.resolve("accounts.properties")), true);
+                var sessions = new ObserverPlaySessionService();
+                var admissions = new ObserverPlayerAdmissionService(server);
+                try (var bridge = new ObserverBridgeServer(accounts, sessions, admissions);
+                     var client = HttpClient.newHttpClient()) {
+                    int port = bridge.start(0, "http://localhost:8080");
+                    for (int scenario = 0; scenario < 9; scenario++) {
+                        var inbox = new Inbox();
+                        var socket = client.newWebSocketBuilder().header("Origin", "http://localhost:8080")
+                                .subprotocols(ObserverAuthenticatedExchange.PROTOCOL)
+                                .buildAsync(URI.create("ws://127.0.0.1:" + port + ObserverBridgeServer.PATH), inbox)
+                                .get(5, TimeUnit.SECONDS);
+                        try {
+                            var hello = inbox.take("hello");
+                            require(hello.get("worldBlockUseProtocol").getAsInt() == 1 && !hello.get("play").getAsBoolean(),
+                                    "Block use capability/play boundary");
+                            String name = "use_" + UUID.randomUUID().toString().replace("-", "").substring(0, 10);
+                            send(socket, "{\"type\":\"register\",\"username\":\"" + name
+                                    + "\",\"password\":\"block-use-fixture-password\"}");
+                            var auth = inbox.take("authenticated");
+                            var uuid = UUID.fromString(auth.get("playerUuid").getAsString());
+                            var playerRef = new java.util.concurrent.atomic.AtomicReference<net.minecraft.server.level.ServerPlayer>();
+                            onServer(server, () -> {
+                                var player = server.getPlayerList().getPlayer(uuid);
+                                require(player != null, "Missing admitted player");
+                                playerRef.set(player);
+                                player.connection.handleAcceptPlayerLoad(new ServerboundPlayerLoadedPacket());
+                                player.setGameMode(GameType.SURVIVAL);
+                                player.setItemInHand(InteractionHand.MAIN_HAND, ItemStack.EMPTY);
+                                player.setItemInHand(InteractionHand.OFF_HAND, ItemStack.EMPTY);
+                                var level = player.level();
+                                level.setBlockAndUpdate(pos.north(), Blocks.AIR.defaultBlockState());
+                                level.setBlockAndUpdate(pos.north().below(), Blocks.AIR.defaultBlockState());
+                                level.setBlockAndUpdate(pos.south(), Blocks.STONE.defaultBlockState());
+                                level.setBlockAndUpdate(pos, Blocks.LEVER.defaultBlockState()
+                                        .setValue(LeverBlock.FACE, AttachFace.WALL)
+                                        .setValue(LeverBlock.FACING, Direction.NORTH).setValue(LeverBlock.POWERED, false));
+                                player.snapTo(pos.getX() + 0.5, pos.getY() - 1.12, pos.getZ() - 0.5, 0, 0);
+                            });
+                            send(socket, "{\"type\":\"world_bootstrap\",\"seq\":0}");
+                            var bootstrap = inbox.take("world_bootstrap");
+                            var request = use(auth, bootstrap, 1);
+                            if (scenario >= 2) {
+                                switch (scenario) {
+                                    case 2 -> request.addProperty("sessionEpoch", auth.get("sessionEpoch").getAsLong() + 1);
+                                    case 3 -> request.addProperty("revision", bootstrap.get("revision").getAsInt() + 1);
+                                    case 4 -> request.addProperty("subscriptionId", bootstrap.get("subscriptionId").getAsInt() + 1);
+                                    case 5 -> request.addProperty("dimension", "minecraft:the_nether");
+                                    case 6 -> request.addProperty("seq", 0);
+                                    case 7 -> request.addProperty("x", pos.getX());
+                                    case 8 -> request.addProperty("protocol", 2);
+                                }
+                                send(socket, request.toString());
+                                inbox.closed.get(5, TimeUnit.SECONDS);
+                                onServer(server, () -> require(!playerRef.get().level().getBlockState(pos).getValue(LeverBlock.POWERED),
+                                        "Hostile request mutated lever"));
+                                require(inbox.messages.isEmpty(), "Hostile use was acknowledged");
+                            } else {
+                                send(socket, request.toString());
+                                var used = inbox.take("world_block_use");
+                                require(used.size() == 9 && used.get("protocol").getAsInt() == 1
+                                        && used.get("seq").getAsInt() == 1
+                                        && used.get("sessionEpoch").equals(auth.get("sessionEpoch"))
+                                        && used.get("subscriptionId").equals(bootstrap.get("subscriptionId"))
+                                        && used.get("revision").equals(bootstrap.get("revision"))
+                                        && used.get("dimension").equals(bootstrap.get("dimension"))
+                                        && "applied".equals(used.get("outcome").getAsString())
+                                        && used.get("refreshRequired").getAsBoolean(), "Use response binding/outcome");
+                                onServer(server, () -> require(playerRef.get().level().getBlockState(pos).getValue(LeverBlock.POWERED),
+                                        "Acknowledgment did not mutate real lever"));
+                                if (scenario == 0) {
+                                    send(socket, "{\"type\":\"world_bootstrap\",\"seq\":2}");
+                                    var refreshed = inbox.take("world_bootstrap");
+                                    require(refreshed.get("revision").getAsInt() == bootstrap.get("revision").getAsInt() + 1,
+                                            "Use refresh did not advance revision");
+                                    Thread.sleep(220);
+                                    send(socket, use(auth, refreshed, 3).toString());
+                                    require("applied".equals(inbox.take("world_block_use").get("outcome").getAsString()),
+                                            "Refreshed use did not resume");
+                                    onServer(server, () -> require(!playerRef.get().level().getBlockState(pos).getValue(LeverBlock.POWERED),
+                                            "Second vanilla use did not toggle lever off"));
+                                } else {
+                                    // Even after rate cooldown, old-revision section access is forbidden.
+                                    Thread.sleep(220);
+                                    send(socket, "{\"type\":\"world_section\",\"seq\":2,\"subscriptionId\":"
+                                            + bootstrap.get("subscriptionId") + ",\"revision\":" + bootstrap.get("revision")
+                                            + ",\"chunkX\":" + (pos.getX() >> 4) + ",\"chunkZ\":" + (pos.getZ() >> 4)
+                                            + ",\"sectionY\":" + (pos.getY() >> 4) + "}");
+                                    inbox.closed.get(5, TimeUnit.SECONDS);
+                                    require(inbox.messages.isEmpty(), "Stale post-use section returned");
+                                }
+                            }
+                        } finally { socket.abort(); }
+                    }
+                }
+            } catch (Exception failure) { throw new CompletionException(failure); }
+            finally {
+                if (directory != null) {
+                    try {
+                        Files.deleteIfExists(directory.resolve("accounts.properties"));
+                        Files.deleteIfExists(directory);
+                    } catch (java.io.IOException ignored) { }
+                }
+            }
+        }).orTimeout(45, TimeUnit.SECONDS);
+        helper.startSequence().thenWaitUntil(() -> {
+            if (!result.isDone()) helper.fail("Waiting for authenticated block use");
+            result.join();
+        }).thenSucceed();
+    }
+
+    private static JsonObject use(JsonObject auth, JsonObject bootstrap, int seq) {
+        var request = new JsonObject();
+        request.addProperty("type", "world_block_use");
+        request.addProperty("protocol", 1);
+        request.addProperty("seq", seq);
+        request.add("sessionEpoch", auth.get("sessionEpoch"));
+        request.add("subscriptionId", bootstrap.get("subscriptionId"));
+        request.add("revision", bootstrap.get("revision"));
+        request.add("dimension", bootstrap.get("dimension"));
+        return request;
+    }
+
+    private static void onServer(MinecraftServer server, Runnable action) throws Exception {
+        var done = new CompletableFuture<Void>();
+        server.execute(() -> {
+            try { action.run(); done.complete(null); }
+            catch (Throwable failure) { done.completeExceptionally(failure); }
+        });
+        done.get(5, TimeUnit.SECONDS);
+    }
+
+    private static void send(WebSocket socket, String text) {
+        socket.sendText(text, true).join();
+    }
+
+    private static void require(boolean condition, String message) {
+        if (!condition) throw new AssertionError(message);
+    }
+
+    private static final class Inbox implements WebSocket.Listener {
+        final ArrayBlockingQueue<JsonObject> messages = new ArrayBlockingQueue<>(32);
+        final CompletableFuture<Void> closed = new CompletableFuture<>();
+        final StringBuilder text = new StringBuilder();
+
+        @Override public void onOpen(WebSocket socket) { socket.request(1); }
+
+        @Override public CompletionStage<?> onText(WebSocket socket, CharSequence data, boolean last) {
+            text.append(data);
+            if (text.length() > 8192) throw new AssertionError("Unbounded block-use fixture response");
+            if (last) {
+                if (!messages.offer(JsonParser.parseString(text.toString()).getAsJsonObject())) {
+                    throw new AssertionError("Movement fixture queue full");
+                }
+                text.setLength(0);
+            }
+            socket.request(1);
+            return null;
+        }
+
+        @Override public CompletionStage<?> onClose(WebSocket socket, int status, String reason) {
+            closed.complete(null);
+            return null;
+        }
+
+        @Override public void onError(WebSocket socket, Throwable error) {
+            closed.completeExceptionally(error);
+        }
+
+        JsonObject take(String type) throws Exception {
+            var value = messages.poll(8, TimeUnit.SECONDS);
+            require(value != null && type.equals(value.get("type").getAsString()), "Unexpected block-use fixture response: " + type);
+            return value;
+        }
+    }
+}

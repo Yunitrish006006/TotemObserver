@@ -27,6 +27,9 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
     private long sequence = -1;
     private boolean movementPending;
     private long lastMovementNanos;
+    private boolean blockUsePending, worldRefreshRequired;
+    private long lastBlockUseNanos;
+    private io.netty.util.concurrent.ScheduledFuture<?> blockUseDeadline;
     private io.netty.util.concurrent.ScheduledFuture<?> movementDeadline;
     private int worldSubscriptionId, worldBootstrapRevision;
     private int worldBootstrapMinY, worldBootstrapHeight, worldBootstrapCenterChunkX, worldBootstrapCenterChunkZ;
@@ -52,6 +55,7 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
                     + ",\"worldRegistryProtocol\":" + (playerAdmissions == null ? 0 : ObserverBlockStateRegistry.PROTOCOL)
                     + ",\"worldSectionProtocol\":" + (playerAdmissions == null ? 0 : ObserverWorldSectionCodec.PROTOCOL)
                     + ",\"worldMovementProtocol\":" + (playerAdmissions == null ? 0 : ObserverMovementRequest.PROTOCOL)
+                    + ",\"worldBlockUseProtocol\":" + (playerAdmissions == null ? 0 : ObserverBlockUseRequest.PROTOCOL)
                     + ",\"play\":false}");
             deadline = ctx.executor().schedule(() -> stop(ctx, "Login timed out"), 10, TimeUnit.SECONDS);
         } else if (selected && event instanceof IdleStateEvent) stop(ctx, "Connection idle");
@@ -92,6 +96,10 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
                 requestMovement(ctx, ObserverMovementRequest.from(message));
                 return;
             }
+            if ("world_block_use".equals(type)) {
+                requestBlockUse(ctx, ObserverBlockUseRequest.from(message));
+                return;
+            }
             boolean ping = "ping".equals(type);
             boolean worldState = "world_state".equals(type) && playerAdmissions != null;
             boolean worldBootstrap = "world_bootstrap".equals(type) && playerAdmissions != null;
@@ -123,6 +131,7 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
     private void requestMovement(ChannelHandlerContext ctx, ObserverMovementRequest request) {
         long now = System.nanoTime();
         if (playerAdmissions == null || playerAdmission == null || movementPending || worldBootstrapPending
+                || blockUsePending || worldRefreshRequired
                 || request.seq() <= sequence || request.sessionEpoch() != playSession.epoch()
                 || request.subscriptionId() != worldSubscriptionId || request.revision() != worldBootstrapRevision
                 || !request.dimension().equals(worldBootstrapDimension)
@@ -172,6 +181,56 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
                 });
     }
 
+    private void requestBlockUse(ChannelHandlerContext ctx, ObserverBlockUseRequest request) {
+        long now = System.nanoTime();
+        if (playerAdmissions == null || playerAdmission == null || blockUsePending || movementPending
+                || worldBootstrapPending || worldSectionPending || worldRefreshRequired
+                || request.seq() <= sequence || request.sessionEpoch() != playSession.epoch()
+                || request.subscriptionId() != worldSubscriptionId || request.revision() != worldBootstrapRevision
+                || !request.dimension().equals(worldBootstrapDimension)
+                || (lastBlockUseNanos != 0 && now - lastBlockUseNanos < TimeUnit.MILLISECONDS.toNanos(200))) {
+            stop(ctx, "Block use unavailable");
+            return;
+        }
+        sequence = request.seq();
+        lastBlockUseNanos = now;
+        blockUsePending = true;
+        var expectedAuthentication = session;
+        var expectedSession = playSession;
+        var expectedAdmission = playerAdmission;
+        blockUseDeadline = ctx.executor().schedule(() -> stop(ctx, "Block use timed out"), 5, TimeUnit.SECONDS);
+        playerAdmissions.useBlock(expectedAdmission, request.dimension(), now,
+                () -> accounts.valid(expectedAuthentication)
+                        && playSessions.valid(expectedAuthentication, expectedSession))
+                .whenComplete((result, failure) -> {
+                    try {
+                        ctx.executor().execute(() -> {
+                            blockUsePending = false;
+                            if (blockUseDeadline != null) blockUseDeadline.cancel(false);
+                            if (ended || !ctx.channel().isActive()) return;
+                            if (failure != null || result == null || session != expectedAuthentication
+                                    || playSession != expectedSession || playerAdmission != expectedAdmission
+                                    || !accounts.valid(expectedAuthentication)
+                                    || !playSessions.valid(expectedAuthentication, expectedSession)
+                                    || !playerAdmissions.valid(expectedSession, expectedAdmission)
+                                    || request.subscriptionId() != worldSubscriptionId
+                                    || request.revision() != worldBootstrapRevision) {
+                                stop(ctx, "Block use unavailable");
+                                return;
+                            }
+                            worldRefreshRequired = result.outcome() == ObserverBlockUse.Outcome.APPLIED;
+                            send(ctx, "{\"type\":\"world_block_use\",\"protocol\":1,\"seq\":" + request.seq()
+                                    + ",\"sessionEpoch\":" + expectedSession.epoch()
+                                    + ",\"subscriptionId\":" + request.subscriptionId()
+                                    + ",\"revision\":" + request.revision()
+                                    + ",\"dimension\":\"" + request.dimension() + "\",\"outcome\":\""
+                                    + result.outcome().name().toLowerCase(Locale.ROOT)
+                                    + "\",\"refreshRequired\":" + worldRefreshRequired + "}");
+                        });
+                    } catch (RejectedExecutionException ignored) { /* Release owns admission cleanup. */ }
+                });
+    }
+
     private void requestWorldState(ChannelHandlerContext ctx, long requestSequence) {
         if (worldStatePending || playerAdmission == null) { stop(ctx, "World state unavailable"); return; }
         worldStatePending = true;
@@ -204,7 +263,7 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
     }
 
     private void requestWorldBootstrap(ChannelHandlerContext ctx, long requestSequence) {
-        if (worldBootstrapPending || movementPending || playerAdmission == null) { stop(ctx, "World bootstrap unavailable"); return; }
+        if (worldBootstrapPending || movementPending || blockUsePending || playerAdmission == null) { stop(ctx, "World bootstrap unavailable"); return; }
         worldBootstrapPending = true;
         var expectedSession = playSession;
         var expectedAdmission = playerAdmission;
@@ -239,6 +298,7 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
         worldBootstrapHeight = snapshot.height();
         worldBootstrapCenterChunkX = snapshot.centerChunkX();
         worldBootstrapCenterChunkZ = snapshot.centerChunkZ();
+        worldRefreshRequired = false;
         send(ctx, "{\"type\":\"world_bootstrap\",\"protocol\":" + WORLD_BOOTSTRAP_PROTOCOL
                 + ",\"seq\":" + requestSequence + ",\"sessionEpoch\":" + expectedSession.epoch()
                 + ",\"subscriptionId\":" + worldSubscriptionId + ",\"revision\":" + worldBootstrapRevision
@@ -262,7 +322,7 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
                                      int chunkX, int chunkZ, int sectionY) {
         int minSectionY = Math.floorDiv(worldBootstrapMinY, 16);
         int maxSectionY = Math.floorDiv(worldBootstrapMinY + worldBootstrapHeight - 1, 16);
-        if (worldSectionPending || playerAdmission == null || worldBootstrapDimension == null
+        if (worldSectionPending || blockUsePending || worldRefreshRequired || playerAdmission == null || worldBootstrapDimension == null
                 || subscriptionId != worldSubscriptionId || revision != worldBootstrapRevision
                 || Math.abs((long) chunkX - worldBootstrapCenterChunkX) > WORLD_BOOTSTRAP_RADIUS
                 || Math.abs((long) chunkZ - worldBootstrapCenterChunkZ) > WORLD_BOOTSTRAP_RADIUS
@@ -399,6 +459,8 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
     private void release() {
         if (deadline != null) deadline.cancel(false);
         if (movementDeadline != null) movementDeadline.cancel(false);
+        if (blockUseDeadline != null) blockUseDeadline.cancel(false);
+        blockUsePending = false;
         movementPending = false;
         worldStatePending = false;
         worldBootstrapPending = false;
