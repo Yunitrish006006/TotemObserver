@@ -1,0 +1,25 @@
+name: Format Probe
+
+on:
+  push:
+    branches:
+      - probe/world-section-format
+
+permissions:
+  contents: read
+
+jobs:
+  format-probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.0'
+          channel: stable
+          cache: true
+      - name: Print formatter diff
+        working-directory: client_flutter
+        run: |
+          dart format lib/connection.dart test/world_section_test.dart
+          git diff -- lib/connection.dart test/world_section_test.dart
