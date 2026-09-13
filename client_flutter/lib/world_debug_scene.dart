@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import 'connection.dart';
+import 'world_debug_block_target.dart';
 import 'world_debug_voxel_mesh.dart';
 import 'world_visible_view.dart';
 
@@ -16,6 +17,7 @@ class WorldDebugCamera {
     required this.pitch,
   });
   final double x, y, z, yaw, pitch;
+  static const eyeHeight = 1.62;
 
   bool get valid =>
       [x, y, z, yaw, pitch].every((v) => v.isFinite) &&
@@ -27,7 +29,7 @@ class WorldDebugCamera {
   _Point transform(_Point p) {
     final a = yaw * math.pi / 180;
     final b = pitch * math.pi / 180;
-    final dx = p.x - x, dy = p.y - (y + 1.62), dz = p.z - z;
+    final dx = p.x - x, dy = p.y - (y + eyeHeight), dz = p.z - z;
     final forward = -math.sin(a) * dx + math.cos(a) * dz;
     return _Point(
       -math.cos(a) * dx - math.sin(a) * dz,
@@ -51,6 +53,37 @@ abstract final class WorldDebugScene {
   static const maxFaces = 16384;
   static const near = 0.08;
   static const far = 64.0;
+
+  /// Recomputed from current server state; only a face in the rendered mesh
+  /// can be highlighted. No retained selection, protocol or gameplay authority.
+  static WorldDebugVoxelFace? target(
+    ObserverConnection connection,
+    VisibleWorldPlan plan,
+    List<WorldDebugVoxelFace> faces,
+  ) {
+    if (!accepts(connection, plan)) return null;
+    final hit = WorldDebugBlockRaycast.cast(
+      eyeX: connection.worldX,
+      eyeY: connection.worldY + WorldDebugCamera.eyeHeight,
+      eyeZ: connection.worldZ,
+      yaw: connection.worldYaw,
+      pitch: connection.worldPitch,
+      subscriptionId: plan.subscriptionId,
+      revision: plan.revision,
+      sectionAt: connection.worldSection,
+      stateName: connection.blockStateName,
+    );
+    if (hit == null || hit.distance < near) return null;
+    for (final face in faces.take(maxFaces)) {
+      if (face.blockX == hit.x &&
+          face.blockY == hit.y &&
+          face.blockZ == hit.z &&
+          face.direction == hit.face &&
+          face.stateId == hit.stateId)
+        return face;
+    }
+    return null;
+  }
 
   static List<WorldDebugVoxelFace> collect(
     ObserverConnection connection,
@@ -295,6 +328,7 @@ class _WorldDebugSceneViewState extends State<WorldDebugSceneView> {
       _geometryRevision = connection.worldGeometryRevision;
     }
     final faces = _faces;
+    final target = WorldDebugScene.target(connection, plan, faces);
 
     final camera = WorldDebugCamera(
       x: connection.worldX,
@@ -304,13 +338,15 @@ class _WorldDebugSceneViewState extends State<WorldDebugSceneView> {
       pitch: connection.worldPitch,
     );
     return Semantics(
-      label: '3D 偵錯地形，視角來自伺服器角色位置與朝向',
+      label: target == null
+          ? '3D 偵錯地形，視角來自伺服器角色位置與朝向'
+          : '3D 偵錯地形，準星選取 ${target.blockId}',
       child: AspectRatio(
         aspectRatio: 16 / 9,
         child: ClipRect(
           child: CustomPaint(
             key: const ValueKey('world-debug-scene'),
-            painter: WorldDebugScenePainter(faces, camera),
+            painter: WorldDebugScenePainter(faces, camera, target: target),
           ),
         ),
       ),
@@ -319,9 +355,10 @@ class _WorldDebugSceneViewState extends State<WorldDebugSceneView> {
 }
 
 class WorldDebugScenePainter extends CustomPainter {
-  const WorldDebugScenePainter(this.faces, this.camera);
+  const WorldDebugScenePainter(this.faces, this.camera, {this.target});
   final List<WorldDebugVoxelFace> faces;
   final WorldDebugCamera camera;
+  final WorldDebugVoxelFace? target;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -341,6 +378,19 @@ class WorldDebugScenePainter extends CustomPainter {
           ..strokeWidth = 0.5,
       );
       paint.style = PaintingStyle.fill;
+    }
+    final selected = target;
+    if (selected != null &&
+        faces.take(WorldDebugScene.maxFaces).contains(selected)) {
+      for (final face in WorldDebugScene.project([selected], camera, size)) {
+        canvas.drawPath(
+          Path()..addPolygon(face.points, true),
+          paint
+            ..color = Colors.white
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 2,
+        );
+      }
     }
     paint
       ..color = Colors.white

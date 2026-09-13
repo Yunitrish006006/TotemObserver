@@ -122,6 +122,8 @@ try {
   // Give the independent registry hydrator time to resolve the floor's canonical state.
   // The screenshot is reviewed as rendered evidence; snapshot arrival alone does not prove visibility.
   await page.waitForTimeout(1500);
+  await page.waitForFunction(() => [...document.querySelectorAll('[aria-label]')]
+    .some(node => node.getAttribute('aria-label')?.includes('準星選取')) || document.body.textContent.includes('準星選取'));
   await page.screenshot({path:resolve(evidence,'terrain.png')});
   await activate.click();
   await page.waitForFunction(()=>document.pointerLockElement!==null);
@@ -158,7 +160,7 @@ try {
   await waitFor(async()=> (await state()).players===0,'logout releases real ServerPlayer');
   assert.equal(errors.length,0);
   await writeFile(resolve(evidence,'result.json'),JSON.stringify({passed:true,fixture:ready.fixture,
-    checks:['real-admission','terrain-snapshots','pointer-lock','WASD','wall-collision','jump-land',
+    checks:['real-admission','terrain-snapshots','visible-target-selection','pointer-lock','WASD','wall-collision','jump-land',
       'mouse-look','authoritative-correction','cross-chunk-window','logout-release'],
     initial,wall,jumped,final,sectionParts:sections,revisions:bootstraps.map(b=>b.revision)},null,2));
   console.log('Real browser / Minecraft movement smoke passed');

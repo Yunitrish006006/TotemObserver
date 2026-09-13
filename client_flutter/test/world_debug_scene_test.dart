@@ -38,6 +38,116 @@ const camera = WorldDebugCamera(x: 0.5, y: 0, z: 0, yaw: 0, pitch: 0);
 const size = Size(640, 360);
 
 void main() {
+  testWidgets('selected visible face paints an outline with shared clipping', (
+    tester,
+  ) async {
+    final selected = face(2);
+    final recorder = ui.PictureRecorder();
+    WorldDebugScenePainter(
+      [selected],
+      camera,
+      target: selected,
+    ).paint(Canvas(recorder), size);
+    final picture = recorder.endRecording();
+    await tester.runAsync(() async {
+      final image = await picture.toImage(640, 360);
+      final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+      final file = File(
+        '../build/account-browser-evidence/debug-target-fixture.png',
+      );
+      await file.parent.create(recursive: true);
+      await file.writeAsBytes(bytes!.buffer.asUint8List());
+      image.dispose();
+    });
+    picture.dispose();
+    expect(tester.takeException(), isNull);
+  });
+
+  test('selection follows current camera and requires a rendered face', () {
+    final connection = DebugSliceTestConnection()
+      ..worldY = 69
+      ..worldZ = -44.5
+      ..worldYaw = 0
+      ..worldPitch = 0;
+    final plan = VisibleWorldPlan(
+      subscriptionId: 1,
+      revision: 1,
+      anchorSectionY: 4,
+      targets: const [
+        WorldSectionCoordinate(chunkX: 10, chunkZ: -3, sectionY: 4),
+      ],
+    );
+    connection.addSection(
+      10,
+      -3,
+      4,
+      stateId: 0,
+      specialStateId: 7,
+      specialX: 3,
+      specialZ: 5,
+    );
+    final faces = WorldDebugScene.collect(connection, plan);
+    final selected = WorldDebugScene.target(connection, plan, faces)!;
+    expect((selected.blockX, selected.blockY, selected.blockZ), (163, 70, -43));
+    expect(selected.direction, WorldVoxelFaceDirection.north);
+    connection.worldZ = -43.01;
+    expect(WorldDebugScene.target(connection, plan, faces), isNull);
+    connection.worldZ = -43.1;
+    expect(WorldDebugScene.target(connection, plan, faces), isNotNull);
+    connection.worldZ = -44.5;
+    expect(WorldDebugScene.target(connection, plan, []), isNull);
+    expect(
+      WorldDebugScene.target(
+        connection,
+        plan,
+        faces.where((f) => !identical(f, selected)).toList(),
+      ),
+      isNull,
+    );
+    connection.worldYaw = 180;
+    expect(WorldDebugScene.target(connection, plan, faces), isNull);
+    connection.worldYaw = 0;
+    connection.completed.clear();
+    expect(WorldDebugScene.target(connection, plan, faces), isNull);
+    connection.dispose();
+  });
+
+  test('selection fails closed for stale revision or mismatched dimension', () {
+    final connection = DebugSliceTestConnection()
+      ..worldY = 69
+      ..worldZ = -44.5
+      ..worldYaw = 0
+      ..worldPitch = 0;
+    final plan = VisibleWorldPlan(
+      subscriptionId: 1,
+      revision: 1,
+      anchorSectionY: 4,
+      targets: const [
+        WorldSectionCoordinate(chunkX: 10, chunkZ: -3, sectionY: 4),
+      ],
+    );
+    connection.addSection(
+      10,
+      -3,
+      4,
+      stateId: 0,
+      specialStateId: 7,
+      specialX: 3,
+      specialZ: 5,
+    );
+    final faces = WorldDebugScene.collect(connection, plan);
+    expect(WorldDebugScene.target(connection, plan, faces), isNotNull);
+    connection.worldDimension = 'minecraft:the_nether';
+    expect(WorldDebugScene.target(connection, plan, faces), isNull);
+    connection.worldDimension = connection.bootstrapDimension;
+    connection.bootstrapRevision++;
+    expect(WorldDebugScene.target(connection, plan, faces), isNull);
+    connection.bootstrapRevision--;
+    connection.playerAttached = false;
+    expect(WorldDebugScene.target(connection, plan, faces), isNull);
+    connection.dispose();
+  });
+
   test('perspective makes distant faces smaller and orders far to near', () {
     final result = WorldDebugScene.project([face(2), face(4)], camera, size);
     expect(result.length, 2);
