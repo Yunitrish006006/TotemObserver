@@ -4,6 +4,7 @@ import com.mojang.authlib.GameProfile;
 import dev.totem.observer.TotemObserver;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.embedded.EmbeddedChannel;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.Connection;
 import net.minecraft.network.PacketListener;
@@ -26,6 +27,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -129,6 +131,17 @@ public final class ObserverPlayerAdmissionService implements AutoCloseable {
         }
     }
 
+    // One stable Fabric callback; closing a bridge removes its service entirely.
+    // Concurrent iteration permits service creation/closure from a tick callback.
+    private static final Set<ObserverPlayerAdmissionService> TICKING = ConcurrentHashMap.newKeySet();
+    static {
+        ServerTickEvents.END_SERVER_TICK.register(server -> {
+            for (var service : TICKING) {
+                if (service.server == server) service.tickPendingAdmissions();
+            }
+        });
+    }
+
     private final MinecraftServer server;
     private final Map<String, Active> active = new ConcurrentHashMap<>();
     /** Server-thread only; pending spawn preparation is advanced once per Minecraft tick. */
@@ -139,13 +152,8 @@ public final class ObserverPlayerAdmissionService implements AutoCloseable {
 
     public ObserverPlayerAdmissionService(MinecraftServer server) {
         this.server = Objects.requireNonNull(server, "server");
-        // PrepareSpawnTask deliberately spans ticks while spawn chunks are located/loaded. MinecraftServer
-        // has no tickable removal API, so a closed service leaves only this constant-time no-op callback.
-        // execute() may run inline inside an existing tickable (including GameTest callbacks).
-        // Always enqueue registration so tickChildren never observes its list changing mid-iteration.
-        server.schedule(server.wrapRunnable(() -> {
-            if (!closed) server.addTickable(this::tickPendingAdmissions);
-        }));
+        // Publish only after all instance fields, including server, are initialized.
+        TICKING.add(this);
     }
 
     /** Completes only after vanilla spawn preparation and PlayerList admission have run on the server thread. */
@@ -479,6 +487,7 @@ public final class ObserverPlayerAdmissionService implements AutoCloseable {
     @Override public void close() {
         if (closed) return;
         closed = true;
+        TICKING.remove(this);
         execute(() -> {
             for (var value : new ArrayList<>(pending.values())) cancelPending(value);
             pending.clear();

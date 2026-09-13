@@ -3,6 +3,7 @@ package dev.totem.observer.bridge;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.minecraft.core.BlockPos;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.server.MinecraftServer;
@@ -59,24 +60,26 @@ public final class ObserverMovementProtocolGameTest {
     }
 
     @GameTest(maxTicks = 100_000)
-    public void admissionConstructionInsideTickCallbackIsDeferred(GameTestHelper helper) {
+    public void admissionConstructionInsideTickCallbackIsSafe(GameTestHelper helper) {
         var server = helper.getLevel().getServer();
         var completed = new CompletableFuture<Void>();
-        server.schedule(server.wrapRunnable(() -> server.addTickable(new Runnable() {
-            private boolean ran;
-            @Override public void run() {
-                if (ran) return;
-                ran = true;
-                // Regression: inline addTickable here mutates tickChildren's active iterator.
-                var admissions = new ObserverPlayerAdmissionService(server);
-                server.schedule(server.wrapRunnable(() -> {
-                    admissions.close();
-                    completed.complete(null);
-                }));
-            }
-        })));
+        var ran = new java.util.concurrent.atomic.AtomicBoolean();
+        ServerTickEvents.END_SERVER_TICK.register(tickingServer -> {
+            if (tickingServer != server || !ran.compareAndSet(false, true)) return;
+            var sessions = new ObserverPlaySessionService();
+            var admissions = new ObserverPlayerAdmissionService(server);
+            String account = "tick_" + UUID.randomUUID().toString().replace("-", "").substring(0, 10);
+            var authentication = new ObserverAccountService.Session(account, UUID.randomUUID());
+            admissions.open(sessions.open(authentication)).whenComplete((admission, failure) -> {
+                admissions.close();
+                sessions.close();
+                if (failure != null) completed.completeExceptionally(failure);
+                else if (admission == null) completed.completeExceptionally(new AssertionError("Missing tick admission"));
+                else completed.complete(null);
+            });
+        });
         helper.startSequence().thenWaitUntil(() -> {
-            if (!completed.isDone()) helper.fail("Waiting for deferred admission registration");
+            if (!completed.isDone()) helper.fail("Waiting for tick-callback admission lifecycle");
             completed.join();
         }).thenSucceed();
     }
