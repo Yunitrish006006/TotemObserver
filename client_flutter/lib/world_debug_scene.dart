@@ -30,7 +30,7 @@ class WorldDebugCamera {
     final dx = p.x - x, dy = p.y - (y + 1.62), dz = p.z - z;
     final forward = -math.sin(a) * dx + math.cos(a) * dz;
     return _Point(
-      math.cos(a) * dx + math.sin(a) * dz,
+      -math.cos(a) * dx - math.sin(a) * dz,
       math.cos(b) * dy + math.sin(b) * forward,
       -math.sin(b) * dy + math.cos(b) * forward,
     );
