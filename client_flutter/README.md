@@ -1,6 +1,6 @@
 # Observer 多人網頁客戶端
 
-目前完成本機帳號連線介面與第一段 Minecraft 玩家接入：建立帳號、登入、確認連線、登出與失聯處理，並由伺服器為每個帳號核發固定玩家 UUID / profile name 與每次登入更新的 session epoch。登入成功後，26.2 專用伺服器會建立真正的 `ServerPlayer` 並加入原版 `PlayerList`，使用原版 playerdata 保存與重載。Flutter 已接收有上限的 section snapshots 並呈現 debug 3D 地形；伺服器協商 movement protocol 後可啟用第一人稱 WASD／滑鼠／jump，位置由伺服器校正。Moving chunk window 已接入，完整 playable 串接驗證仍待完成，挖掘、物品、實體與容器互動尚未開放，`play:false` 維持不變；帳號登入不會取得 `/observeui`、OP 或額外遊戲權限。
+目前完成本機帳號連線介面與第一段 Minecraft 玩家接入：建立帳號、登入、確認連線、登出與失聯處理，並由伺服器為每個帳號核發固定玩家 UUID / profile name 與每次登入更新的 session epoch。登入成功後，26.2 專用伺服器會建立真正的 `ServerPlayer` 並加入原版 `PlayerList`，使用原版 playerdata 保存與重載。Flutter 已接收有上限的 section snapshots 並呈現 debug 3D 地形；伺服器協商 movement protocol 後可啟用第一人稱 WASD／滑鼠／jump，位置由伺服器校正。Moving chunk window 已接入，第一人稱移動 prototype 已通過真正 browser/server 同一 session 驗證，挖掘、物品、實體與容器互動尚未開放，`play:false` 維持不變；帳號登入不會取得 `/observeui`、OP 或額外遊戲權限。
 
 ## 啟動
 
@@ -59,6 +59,12 @@ npm test
 
 `JAVA_HOME` 必須是 Java 25；可用 `CHROME_BIN` 指定既有 Chromium。瀏覽器測試自動建立隔離帳號檔，不連正式 Minecraft 世界；畫面與結果寫入 `build/account-browser-evidence/`。GitHub `Build` workflow 共用一次 Java/Flutter 建置與上述固定測試，不另建重複工作流程。Server GameTest 另驗證真正 `PlayerList` admission、固定玩家 replacement、vanilla playerdata 保存/重載與 stale release 安全性；GameTest 專用容量調整只存在 test mod，不進 production mixin。
 
-繁中字型隨網頁附上，避免首次載入缺字。[Noto Sans TC 上游](https://github.com/google/fonts/tree/main/ofl/notosanstc) 的 SIL Open Font License 一併放在 `assets/fonts/OFL.txt`。目前已能顯示附近 debug 3D 地形與協商後的第一人稱輸入。Browser fixture 驗證 DOM pointer lock、載入期間的輸入、Esc 與斷線清理，並不執行 Minecraft 物理。真正 browser/server playable milestone 仍須同一 session 的整合驗證；請勿把 fixture 成功視為完整可玩證據。
+繁中字型隨網頁附上，避免首次載入缺字。[Noto Sans TC 上游](https://github.com/google/fonts/tree/main/ofl/notosanstc) 的 SIL Open Font License 一併放在 `assets/fonts/OFL.txt`。目前已能顯示附近 debug 3D 地形與協商後的第一人稱輸入。Browser fixture 驗證 DOM pointer lock、載入期間的輸入、Esc 與斷線清理，並不執行 Minecraft 物理。真正 browser/server 同一 session 的移動驗證由獨立 `test:playable` 執行；請勿把 mock fixture 成功視為 Minecraft 物理證據。
 
 另有 `npm run test:playable` 啟動隔離的真正 Minecraft dedicated server，使用正式 bridge 與實際 Chromium 按鍵驗證 ServerPlayer 移動、碰撞、跳躍、校正與跨 chunk。它與上述 mock fixture 分開，使用 `build/browser-playable/` 保存實機證據；重跑前需保留／移走舊測試目錄。詳見 [real browser smoke](../docs/browser-server-playable-smoke.md)。
+
+### 已驗證的第一人稱移動版本
+
+[PR #32](https://github.com/Yunitrish006006/TotemObserver/pull/32) 的 `test/browser-server-playable-smoke` 分支、commit `39166fb1fab3f0718b34294e8a7cf75fce96da46` 已通過 Build、Observer 3-JVM E2E 與 Observer Runtime Validation。Build log 確認 16 個 dedicated GameTests 與真正瀏覽器移動 smoke 成功。使用上方啟動步驟可測試登入、debug 3D 地形、滑鼠／WASD／Space、碰撞、校正與跨 chunk 更新；PR 尚未 merge，需使用此 stack 的 server JAR 與 Flutter client。
+
+此版本仍沒有 textures、entities、挖掘／放置或 inventory/container。準星選取與後續互動 slices 的驗證分開記錄，不能把這個 commit 的成功延伸成後續未完成的功能證據。
