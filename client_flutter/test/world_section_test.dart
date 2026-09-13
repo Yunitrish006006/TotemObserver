@@ -190,52 +190,55 @@ void main() {
     connection.dispose();
   });
 
-  test('keeps an unavailable loaded-chunk result nonfatal until resync', () async {
-    final (connection, socket) = await connectSection();
-
-    connection.requestWorldSection(10, -3, -4);
-    expect(jsonDecode(socket.sent.last)['seq'], 3);
-    socket.receive(unavailableSection());
-
-    expect(connection.phase, ConnectionPhase.connected);
-    expect(socket.closed, isFalse);
-    expect(connection.worldSection(10, -3, -4), isNull);
-    expect(connection.worldSectionUnavailable(10, -3, -4), isTrue);
-
-    final beforeRetry = socket.sent.length;
-    connection.requestWorldSection(10, -3, -4);
-    expect(
-      socket.sent.length,
-      beforeRetry,
-      reason: 'known-unavailable section must not retry in one revision',
-    );
-
-    connection.resyncWorld();
-    expect(jsonDecode(socket.sent.last), {'type': 'world_bootstrap', 'seq': 4});
-    socket.receive(bootstrap(seq: 4, revision: 2));
-    expect(connection.worldSectionUnavailable(10, -3, -4), isFalse);
-
-    connection.dispose();
-  });
-
   test(
-    'rejects a section part with a mismatched registry fingerprint',
+    'keeps an unavailable loaded-chunk result nonfatal until resync',
     () async {
       final (connection, socket) = await connectSection();
+
       connection.requestWorldSection(10, -3, -4);
-      socket.receive(
-        sectionPart(
-          0,
-          fingerprint:
-              'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff',
-        ),
+      expect(jsonDecode(socket.sent.last)['seq'], 3);
+      socket.receive(unavailableSection());
+
+      expect(connection.phase, ConnectionPhase.connected);
+      expect(socket.closed, isFalse);
+      expect(connection.worldSection(10, -3, -4), isNull);
+      expect(connection.worldSectionUnavailable(10, -3, -4), isTrue);
+
+      final beforeRetry = socket.sent.length;
+      connection.requestWorldSection(10, -3, -4);
+      expect(
+        socket.sent.length,
+        beforeRetry,
+        reason: 'known-unavailable section must not retry in one revision',
       );
-      expect(connection.phase, ConnectionPhase.offline);
-      expect(connection.status, '伺服器回應不相容，請重新連線');
-      expect(socket.closed, isTrue);
+
+      connection.resyncWorld();
+      expect(jsonDecode(socket.sent.last), {
+        'type': 'world_bootstrap',
+        'seq': 4,
+      });
+      socket.receive(bootstrap(seq: 4, revision: 2));
+      expect(connection.worldSectionUnavailable(10, -3, -4), isFalse);
+
       connection.dispose();
     },
   );
+
+  test('rejects a section part with a mismatched registry fingerprint', () async {
+    final (connection, socket) = await connectSection();
+    connection.requestWorldSection(10, -3, -4);
+    socket.receive(
+      sectionPart(
+        0,
+        fingerprint:
+            'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff',
+      ),
+    );
+    expect(connection.phase, ConnectionPhase.offline);
+    expect(connection.status, '伺服器回應不相容，請重新連線');
+    expect(socket.closed, isTrue);
+    connection.dispose();
+  });
 
   test('does not request sections outside bootstrap bounds', () async {
     final (connection, socket) = await connectSection();
