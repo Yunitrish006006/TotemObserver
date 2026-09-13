@@ -4,6 +4,7 @@ import com.mojang.authlib.GameProfile;
 import dev.totem.observer.TotemObserver;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.embedded.EmbeddedChannel;
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.Connection;
 import net.minecraft.network.PacketListener;
 import net.minecraft.network.ProtocolInfo;
@@ -18,6 +19,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.network.CommonListenerCookie;
 import net.minecraft.server.network.config.PrepareSpawnTask;
 import net.minecraft.server.players.NameAndId;
+import net.minecraft.world.level.block.Block;
 
 import java.net.InetSocketAddress;
 import java.util.ArrayList;
@@ -69,6 +71,29 @@ public final class ObserverPlayerAdmissionService implements AutoCloseable {
                 throw new IllegalArgumentException("Invalid world bootstrap");
             }
         }
+    }
+
+    /** Immutable block-state snapshot for exactly one loaded 16x16x16 section. */
+    public record WorldSection(String dimension, int chunkX, int chunkZ, int sectionY, int[] stateIds) {
+        public WorldSection {
+            Objects.requireNonNull(dimension, "dimension");
+            Objects.requireNonNull(stateIds, "stateIds");
+            if (!dimension.matches("[a-z0-9_.-]+:[a-z0-9_./-]+")
+                    || chunkX < -2_000_000 || chunkX > 2_000_000
+                    || chunkZ < -2_000_000 || chunkZ > 2_000_000
+                    || sectionY < -512 || sectionY > 512
+                    || stateIds.length != ObserverWorldSectionCodec.STATES_PER_SECTION) {
+                throw new IllegalArgumentException("Invalid world section");
+            }
+            stateIds = stateIds.clone();
+            for (int stateId : stateIds) {
+                if (stateId < 0 || stateId > ObserverWorldSectionCodec.MAX_STATE_ID) {
+                    throw new IllegalArgumentException("Invalid block-state id");
+                }
+            }
+        }
+
+        @Override public int[] stateIds() { return stateIds.clone(); }
     }
 
     private record Active(Admission admission, ObserverClientConnection connection) {}
@@ -150,6 +175,62 @@ public final class ObserverPlayerAdmissionService implements AutoCloseable {
                 result.complete(new WorldBootstrap(
                         level.dimension().identifier().toString(), level.getMinY(), level.getHeight(),
                         blockX >> 4, blockZ >> 4));
+            } catch (Throwable failure) {
+                result.completeExceptionally(failure);
+            }
+        });
+        return result;
+    }
+
+    /**
+     * Copies one already-loaded section on the Minecraft server thread. Observer never force-loads or generates a
+     * chunk to satisfy this request; a missing chunk completes with {@code null}.
+     */
+    public CompletableFuture<WorldSection> section(Admission admission, int chunkX, int chunkZ, int sectionY) {
+        var result = new CompletableFuture<WorldSection>();
+        if (admission == null) {
+            result.complete(null);
+            return result;
+        }
+        execute(() -> {
+            try {
+                if (!valid(admission.playSession(), admission)) {
+                    result.complete(null);
+                    return;
+                }
+                var player = admission.player();
+                var level = player.level();
+                int minSectionY = Math.floorDiv(level.getMinY(), 16);
+                int maxSectionY = Math.floorDiv(level.getMinY() + level.getHeight() - 1, 16);
+                if (sectionY < minSectionY || sectionY > maxSectionY) {
+                    result.complete(null);
+                    return;
+                }
+                var chunk = level.getChunkSource().getChunkNow(chunkX, chunkZ);
+                if (chunk == null) {
+                    result.complete(null);
+                    return;
+                }
+                var states = new int[ObserverWorldSectionCodec.STATES_PER_SECTION];
+                int baseX = chunkX << 4;
+                int baseY = sectionY << 4;
+                int baseZ = chunkZ << 4;
+                int index = 0;
+                var position = new BlockPos.MutableBlockPos();
+                for (int localY = 0; localY < 16; localY++) {
+                    for (int localZ = 0; localZ < 16; localZ++) {
+                        for (int localX = 0; localX < 16; localX++) {
+                            position.set(baseX + localX, baseY + localY, baseZ + localZ);
+                            int stateId = Block.BLOCK_STATE_REGISTRY.getId(chunk.getBlockState(position));
+                            if (stateId < 0 || stateId > ObserverWorldSectionCodec.MAX_STATE_ID) {
+                                throw new IllegalStateException("Block-state id outside Observer wire range: " + stateId);
+                            }
+                            states[index++] = stateId;
+                        }
+                    }
+                }
+                result.complete(new WorldSection(
+                        level.dimension().identifier().toString(), chunkX, chunkZ, sectionY, states));
             } catch (Throwable failure) {
                 result.completeExceptionally(failure);
             }
