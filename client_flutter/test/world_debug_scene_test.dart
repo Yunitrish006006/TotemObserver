@@ -42,6 +42,20 @@ void main() {
     expect(width(result.first), closeTo(width(result.last) / 2, 0.001));
   });
 
+  test('Minecraft east is screen-left when facing south', () {
+    final projected = WorldDebugScene.project([face(4, x: 1)], camera, size);
+    expect(projected.single.points.every((p) => p.dx < size.width / 2), isTrue);
+  });
+
+  test('Minecraft south is screen-left when facing west', () {
+    final projected = WorldDebugScene.project(
+      [face(1, x: -4, direction: WorldVoxelFaceDirection.east)],
+      const WorldDebugCamera(x: 0.5, y: 0, z: 0.5, yaw: 90, pitch: 0),
+      size,
+    );
+    expect(projected.single.points.every((p) => p.dx < size.width / 2), isTrue);
+  });
+
   test('rear, far and back-facing surfaces disappear', () {
     expect(
       WorldDebugScene.project(
