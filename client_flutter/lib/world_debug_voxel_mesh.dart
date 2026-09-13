@@ -41,14 +41,14 @@ class WorldDebugVoxelMesh {
   WorldDebugVoxelMesh({
     required List<WorldDebugVoxelFace> faces,
     required this.unresolvedSourceCells,
-    required this.suppressedUnknownNeighbors,
-    required this.suppressedMissingNeighborSections,
+    required this.suppressedUnknownNeighborFaces,
+    required this.suppressedMissingNeighborFaces,
   }) : faces = List.unmodifiable(faces);
 
   final List<WorldDebugVoxelFace> faces;
   final int unresolvedSourceCells;
-  final int suppressedUnknownNeighbors;
-  final int suppressedMissingNeighborSections;
+  final int suppressedUnknownNeighborFaces;
+  final int suppressedMissingNeighborFaces;
 
   int get faceCount => faces.length;
 }
@@ -65,18 +65,25 @@ abstract final class WorldDebugVoxelMesher {
     required String? Function(int rawId) stateName,
   }) {
     final faces = <WorldDebugVoxelFace>[];
+    final descriptors = <int, WorldBlockStateDescriptor>{};
     int unresolvedSourceCells = 0;
-    int suppressedUnknownNeighbors = 0;
-    int suppressedMissingNeighborSections = 0;
+    int suppressedUnknownNeighborFaces = 0;
+    int suppressedMissingNeighborFaces = 0;
+
+    WorldBlockStateDescriptor descriptorFor(int stateId) =>
+        descriptors.putIfAbsent(
+          stateId,
+          () => WorldBlockStateDescriptor.fromCanonical(
+            stateId,
+            stateName(stateId),
+          ),
+        );
 
     for (int localY = 0; localY < 16; localY++) {
       for (int localZ = 0; localZ < 16; localZ++) {
         for (int localX = 0; localX < 16; localX++) {
           final stateId = section.stateAt(localX, localY, localZ);
-          final descriptor = WorldBlockStateDescriptor.fromCanonical(
-            stateId,
-            stateName(stateId),
-          );
+          final descriptor = descriptorFor(stateId);
           if (!descriptor.isKnown) {
             unresolvedSourceCells++;
             continue;
@@ -93,20 +100,17 @@ abstract final class WorldDebugVoxelMesher {
               sectionAt: sectionAt,
             );
             if (neighbor.missingSection) {
-              suppressedMissingNeighborSections++;
+              suppressedMissingNeighborFaces++;
               continue;
             }
             final neighborStateId = neighbor.stateId;
             if (neighborStateId == null) {
-              suppressedMissingNeighborSections++;
+              suppressedMissingNeighborFaces++;
               continue;
             }
-            final neighborDescriptor = WorldBlockStateDescriptor.fromCanonical(
-              neighborStateId,
-              stateName(neighborStateId),
-            );
+            final neighborDescriptor = descriptorFor(neighborStateId);
             if (!neighborDescriptor.isKnown) {
-              suppressedUnknownNeighbors++;
+              suppressedUnknownNeighborFaces++;
               continue;
             }
             if (!neighborDescriptor.isAir) continue;
@@ -133,8 +137,8 @@ abstract final class WorldDebugVoxelMesher {
     return WorldDebugVoxelMesh(
       faces: faces,
       unresolvedSourceCells: unresolvedSourceCells,
-      suppressedUnknownNeighbors: suppressedUnknownNeighbors,
-      suppressedMissingNeighborSections: suppressedMissingNeighborSections,
+      suppressedUnknownNeighborFaces: suppressedUnknownNeighborFaces,
+      suppressedMissingNeighborFaces: suppressedMissingNeighborFaces,
     );
   }
 
