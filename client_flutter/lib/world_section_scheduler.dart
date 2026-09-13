@@ -54,12 +54,7 @@ class WorldSectionScheduler extends ChangeNotifier {
     if (!_eligible(coordinate) ||
         _active == coordinate ||
         _queued.contains(coordinate) ||
-        connection.worldSection(
-              coordinate.chunkX,
-              coordinate.chunkZ,
-              coordinate.sectionY,
-            ) !=
-            null ||
+        _hasSnapshot(coordinate) ||
         _queue.length >= maxQueuedSections) {
       return false;
     }
@@ -75,12 +70,9 @@ class WorldSectionScheduler extends ChangeNotifier {
   int enqueueHorizontalWindow(int sectionY) {
     if (!connection.hasWorldBootstrap) return 0;
     final candidates = <WorldSectionCoordinate>[];
-    for (int dz = -connection.bootstrapRadius;
-        dz <= connection.bootstrapRadius;
-        dz++) {
-      for (int dx = -connection.bootstrapRadius;
-          dx <= connection.bootstrapRadius;
-          dx++) {
+    final radius = connection.bootstrapRadius;
+    for (int dz = -radius; dz <= radius; dz++) {
+      for (int dx = -radius; dx <= radius; dx++) {
         candidates.add(
           WorldSectionCoordinate(
             chunkX: connection.bootstrapCenterChunkX + dx,
@@ -136,6 +128,14 @@ class WorldSectionScheduler extends ChangeNotifier {
         coordinate.sectionY <= maxSectionY;
   }
 
+  bool _hasSnapshot(WorldSectionCoordinate coordinate) =>
+      connection.worldSection(
+        coordinate.chunkX,
+        coordinate.chunkZ,
+        coordinate.sectionY,
+      ) !=
+      null;
+
   void _captureContext() {
     _subscriptionId = connection.bootstrapSubscriptionId;
     _revision = connection.bootstrapRevision;
@@ -159,13 +159,7 @@ class WorldSectionScheduler extends ChangeNotifier {
     }
 
     final active = _active;
-    if (active != null &&
-        connection.worldSection(
-              active.chunkX,
-              active.chunkZ,
-              active.sectionY,
-            ) !=
-            null) {
+    if (active != null && _hasSnapshot(active)) {
       _active = null;
       _pump();
       _notify();
@@ -182,11 +176,7 @@ class WorldSectionScheduler extends ChangeNotifier {
     while (_queue.isNotEmpty) {
       final next = _queue.removeAt(0);
       _queued.remove(next);
-      if (!_eligible(next) ||
-          connection.worldSection(next.chunkX, next.chunkZ, next.sectionY) !=
-              null) {
-        continue;
-      }
+      if (!_eligible(next) || _hasSnapshot(next)) continue;
       _active = next;
       connection.requestWorldSection(next.chunkX, next.chunkZ, next.sectionY);
       return;
