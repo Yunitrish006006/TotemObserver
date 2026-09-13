@@ -147,20 +147,23 @@ void main() {
     connection.dispose();
   });
 
-  test('palette uses registry names for air instead of assuming raw id zero', () {
-    expect(
-      WorldDebugSlicePalette.colorFor(19, 'minecraft:air'),
-      WorldDebugSlicePalette.empty,
-    );
-    expect(
-      WorldDebugSlicePalette.colorFor(19, 'minecraft:cave_air'),
-      WorldDebugSlicePalette.empty,
-    );
-    expect(
-      WorldDebugSlicePalette.colorFor(0, 'minecraft:stone'),
-      isNot(WorldDebugSlicePalette.empty),
-    );
-  });
+  test(
+    'palette uses registry names for air instead of assuming raw id zero',
+    () {
+      expect(
+        WorldDebugSlicePalette.colorFor(19, 'minecraft:air'),
+        WorldDebugSlicePalette.empty,
+      );
+      expect(
+        WorldDebugSlicePalette.colorFor(19, 'minecraft:cave_air'),
+        WorldDebugSlicePalette.empty,
+      );
+      expect(
+        WorldDebugSlicePalette.colorFor(0, 'minecraft:stone'),
+        isNot(WorldDebugSlicePalette.empty),
+      );
+    },
+  );
 
   testWidgets('debug slice renders partial cache and player marker safely', (
     tester,
