@@ -46,8 +46,8 @@ void main() {
 
     expect(mesh.faceCount, 6);
     expect(mesh.unresolvedSourceCells, 0);
-    expect(mesh.suppressedUnknownNeighbors, 0);
-    expect(mesh.suppressedMissingNeighborSections, 0);
+    expect(mesh.suppressedUnknownNeighborFaces, 0);
+    expect(mesh.suppressedMissingNeighborFaces, 0);
     expect(
       mesh.faces.map((face) => face.direction).toSet(),
       WorldVoxelFaceDirection.values.toSet(),
@@ -69,39 +69,49 @@ void main() {
     expect(mesh.faceCount, 10);
   });
 
-  test('missing neighbor section suppresses boundary face instead of guessing', () {
-    final source = section(cells: {(15, 8, 8): 1});
-    final mesh = WorldDebugVoxelMesher.buildSection(
-      section: source,
-      sectionAt: (_, _, _) => null,
-      stateName: stateName,
-    );
+  test(
+    'missing neighbor section suppresses boundary face instead of guessing',
+    () {
+      final source = section(cells: {(15, 8, 8): 1});
+      final mesh = WorldDebugVoxelMesher.buildSection(
+        section: source,
+        sectionAt: (_, _, _) => null,
+        stateName: stateName,
+      );
 
-    expect(mesh.faceCount, 5);
-    expect(mesh.suppressedMissingNeighborSections, 1);
-    expect(
-      mesh.faces.any((face) => face.direction == WorldVoxelFaceDirection.east),
-      isFalse,
-    );
-  });
+      expect(mesh.faceCount, 5);
+      expect(mesh.suppressedMissingNeighborFaces, 1);
+      expect(
+        mesh.faces.any(
+          (face) => face.direction == WorldVoxelFaceDirection.east,
+        ),
+        isFalse,
+      );
+    },
+  );
 
-  test('matching neighboring section can expose a cross-section boundary face', () {
-    final source = section(cells: {(15, 8, 8): 1});
-    final east = section(chunkX: 1);
-    final mesh = WorldDebugVoxelMesher.buildSection(
-      section: source,
-      sectionAt: (chunkX, chunkZ, sectionY) =>
-          chunkX == 1 && chunkZ == 0 && sectionY == 0 ? east : null,
-      stateName: stateName,
-    );
+  test(
+    'matching neighboring section can expose a cross-section boundary face',
+    () {
+      final source = section(cells: {(15, 8, 8): 1});
+      final east = section(chunkX: 1);
+      final mesh = WorldDebugVoxelMesher.buildSection(
+        section: source,
+        sectionAt: (chunkX, chunkZ, sectionY) =>
+            chunkX == 1 && chunkZ == 0 && sectionY == 0 ? east : null,
+        stateName: stateName,
+      );
 
-    expect(mesh.faceCount, 6);
-    expect(mesh.suppressedMissingNeighborSections, 0);
-    expect(
-      mesh.faces.any((face) => face.direction == WorldVoxelFaceDirection.east),
-      isTrue,
-    );
-  });
+      expect(mesh.faceCount, 6);
+      expect(mesh.suppressedMissingNeighborFaces, 0);
+      expect(
+        mesh.faces.any(
+          (face) => face.direction == WorldVoxelFaceDirection.east,
+        ),
+        isTrue,
+      );
+    },
+  );
 
   test('stale neighboring section is rejected at the revision boundary', () {
     final source = section(cells: {(15, 8, 8): 1});
@@ -113,7 +123,7 @@ void main() {
     );
 
     expect(mesh.faceCount, 5);
-    expect(mesh.suppressedMissingNeighborSections, 1);
+    expect(mesh.suppressedMissingNeighborFaces, 1);
   });
 
   test('unknown source state never becomes guessed cube geometry', () {
@@ -138,7 +148,7 @@ void main() {
 
     expect(mesh.faceCount, 5);
     expect(mesh.unresolvedSourceCells, 1);
-    expect(mesh.suppressedUnknownNeighbors, 1);
+    expect(mesh.suppressedUnknownNeighborFaces, 1);
   });
 
   test('known fluid is meshed only where exact air is adjacent', () {
