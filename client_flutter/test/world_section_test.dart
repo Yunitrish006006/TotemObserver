@@ -175,21 +175,24 @@ void main() {
     connection.dispose();
   });
 
-  test('rejects a section part with a mismatched registry fingerprint', () async {
-    final (connection, socket) = await connectSection();
-    connection.requestWorldSection(10, -3, -4);
-    socket.receive(
-      sectionPart(
-        0,
-        fingerprint:
-            'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff',
-      ),
-    );
-    expect(connection.phase, ConnectionPhase.offline);
-    expect(connection.status, '伺服器回應不相容，請重新連線');
-    expect(socket.closed, isTrue);
-    connection.dispose();
-  });
+  test(
+    'rejects a section part with a mismatched registry fingerprint',
+    () async {
+      final (connection, socket) = await connectSection();
+      connection.requestWorldSection(10, -3, -4);
+      socket.receive(
+        sectionPart(
+          0,
+          fingerprint:
+              'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff',
+        ),
+      );
+      expect(connection.phase, ConnectionPhase.offline);
+      expect(connection.status, '伺服器回應不相容，請重新連線');
+      expect(socket.closed, isTrue);
+      connection.dispose();
+    },
+  );
 
   test('does not request sections outside bootstrap bounds', () async {
     final (connection, socket) = await connectSection();
