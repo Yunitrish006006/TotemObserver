@@ -94,6 +94,12 @@ jobs:
           npx playwright install --with-deps chromium
           npm test
 
+      - name: Verify real browser and Minecraft movement
+        working-directory: client_flutter/browser_tests
+        env:
+          TOTEM_CORE_JAR: ${{ github.workspace }}/.lockstep/TotemCore/build/libs/totem-core-0.7.18.jar
+        run: npm run test:playable
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -103,6 +109,9 @@ jobs:
             build/account-browser-evidence/*.png
             build/account-browser-evidence/result.json
             build/account-browser-evidence/movement-input-result.json
+            build/browser-playable/results/*.png
+            build/browser-playable/results/result.json
+            build/browser-playable/results/server.log
 
       - name: Enforce Observer extraction invariants
         shell: bash

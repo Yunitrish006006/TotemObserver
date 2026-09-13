@@ -60,3 +60,5 @@ npm test
 `JAVA_HOME` 必須是 Java 25；可用 `CHROME_BIN` 指定既有 Chromium。瀏覽器測試自動建立隔離帳號檔，不連正式 Minecraft 世界；畫面與結果寫入 `build/account-browser-evidence/`。GitHub `Build` workflow 共用一次 Java/Flutter 建置與上述固定測試，不另建重複工作流程。Server GameTest 另驗證真正 `PlayerList` admission、固定玩家 replacement、vanilla playerdata 保存/重載與 stale release 安全性；GameTest 專用容量調整只存在 test mod，不進 production mixin。
 
 繁中字型隨網頁附上，避免首次載入缺字。[Noto Sans TC 上游](https://github.com/google/fonts/tree/main/ofl/notosanstc) 的 SIL Open Font License 一併放在 `assets/fonts/OFL.txt`。目前已能顯示附近 debug 3D 地形與協商後的第一人稱輸入。Browser fixture 驗證 DOM pointer lock、載入期間的輸入、Esc 與斷線清理，並不執行 Minecraft 物理。真正 browser/server playable milestone 仍須同一 session 的整合驗證；請勿把 fixture 成功視為完整可玩證據。
+
+另有 `npm run test:playable` 啟動隔離的真正 Minecraft dedicated server，使用正式 bridge 與實際 Chromium 按鍵驗證 ServerPlayer 移動、碰撞、跳躍、校正與跨 chunk。它與上述 mock fixture 分開，使用 `build/browser-playable/` 保存實機證據；重跑前需保留／移走舊測試目錄。詳見 [real browser smoke](../docs/browser-server-playable-smoke.md)。
