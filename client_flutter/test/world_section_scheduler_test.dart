@@ -68,37 +68,40 @@ class SchedulerTestConnection extends ObserverConnection {
 }
 
 void main() {
-  test('queues a horizontal bootstrap window center-first and serializes work', () {
-    final connection = SchedulerTestConnection();
-    final scheduler = WorldSectionScheduler(connection);
+  test(
+    'queues a horizontal bootstrap window center-first and serializes work',
+    () {
+      final connection = SchedulerTestConnection();
+      final scheduler = WorldSectionScheduler(connection);
 
-    expect(scheduler.enqueueHorizontalWindow(4), 25);
-    expect(connection.requests, hasLength(1));
-    expect(
-      connection.requests.single,
-      const WorldSectionCoordinate(chunkX: 10, chunkZ: -3, sectionY: 4),
-    );
-    expect(scheduler.queuedCount, 24);
+      expect(scheduler.enqueueHorizontalWindow(4), 25);
+      expect(connection.requests, hasLength(1));
+      expect(
+        connection.requests.single,
+        const WorldSectionCoordinate(chunkX: 10, chunkZ: -3, sectionY: 4),
+      );
+      expect(scheduler.queuedCount, 24);
 
-    connection.complete(connection.requests.first);
-    expect(connection.requests, hasLength(2));
-    expect(
-      connection.requests[1],
-      const WorldSectionCoordinate(chunkX: 10, chunkZ: -4, sectionY: 4),
-    );
-    expect(scheduler.queuedCount, 23);
-
-    expect(
-      scheduler.enqueue(
+      connection.complete(connection.requests.first);
+      expect(connection.requests, hasLength(2));
+      expect(
+        connection.requests[1],
         const WorldSectionCoordinate(chunkX: 10, chunkZ: -4, sectionY: 4),
-      ),
-      isFalse,
-      reason: 'active work must not be duplicated',
-    );
+      );
+      expect(scheduler.queuedCount, 23);
 
-    scheduler.dispose();
-    connection.dispose();
-  });
+      expect(
+        scheduler.enqueue(
+          const WorldSectionCoordinate(chunkX: 10, chunkZ: -4, sectionY: 4),
+        ),
+        isFalse,
+        reason: 'active work must not be duplicated',
+      );
+
+      scheduler.dispose();
+      connection.dispose();
+    },
+  );
 
   test('drops queued work when the bootstrap revision changes', () {
     final connection = SchedulerTestConnection();
