@@ -50,7 +50,8 @@
       "dev.totem.observer.bridge.ObserverHotbarGameTest",
       "dev.totem.observer.bridge.ObserverHotbarProtocolGameTest",
       "dev.totem.observer.bridge.ObserverDestroyDriverGameTest",
-      "dev.totem.observer.bridge.ObserverDestroyLifecycleGameTest"
+      "dev.totem.observer.bridge.ObserverDestroyLifecycleGameTest",
+      "dev.totem.observer.bridge.ObserverDestroyProtocolGameTest"
     ]
   },
   "depends": {
