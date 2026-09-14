@@ -66,6 +66,7 @@ try {
   browser=await chromium.launchPersistentContext(profile,browserOptions);
   page=await browser.newPage();
   const errors=[], corrections=[], bootstraps=[], requests=[], uses=[], useRequests=[], outlines=[], hotbars=[];
+  const destroys=[], destroyRequests=[];
   let sections=0; const floorParts=new Map();
   page.on('pageerror',()=>errors.push('runtime error'));
   // Passive observation only: no routing, mocked response, or injected input protocol.
@@ -73,6 +74,7 @@ try {
     socket.on('framereceived',event=>{
       const message=JSON.parse(event.payload.toString());
       if(message.type==='world_movement') corrections.push(message);
+      if(message.type==='world_block_destroy') {destroys.push(message);assert.ok(destroys.length<100);}
       if(message.type==='world_hotbar') {hotbars.push(message);assert.ok(hotbars.length<100,'Bounded hotbar observations');}
       if(message.type==='world_target_outline') { outlines.push(message); assert.ok(outlines.length<100,'Bounded outline observations'); }
       if(message.type==='world_bootstrap') bootstraps.push(message);
@@ -92,6 +94,11 @@ try {
     });
     socket.on('framesent',event=>{
       const message=JSON.parse(event.payload.toString());
+      if(message.type==='world_block_destroy') {
+        assert.deepEqual(Object.keys(message).sort(),
+          ['type','protocol','seq','sessionEpoch','subscriptionId','revision','dimension','operation','action'].sort());
+        destroyRequests.push(message); assert.ok(destroyRequests.length<100);
+      }
       if(message.type==='world_block_use') {
         assert.deepEqual(Object.keys(message).sort(),
           ['type','protocol','seq','sessionEpoch','subscriptionId','revision','dimension'].sort());
@@ -198,6 +205,20 @@ try {
   await waitFor(async()=> (await state()).leverPowered===true,'real lever powered by browser');
   await waitFor(()=>bootstraps.at(-1).revision>beforeUseRevision,'post-use authoritative refresh');
   await page.screenshot({path:resolve(evidence,'after-block-use.png')});
+  const digOrigin=await state();
+  assert.equal(digOrigin.miningTargetRemoved,false);
+  await aim(-Math.atan2(8.5-digOrigin.x,11.5-digOrigin.z)*180/Math.PI,
+    Math.atan2(digOrigin.y+1.62-64.5,Math.hypot(8.5-digOrigin.x,11.5-digOrigin.z))*180/Math.PI);
+  await waitFor(()=>outlines.some(o=>o.target?.x===8 && o.target?.y===64 && o.target?.z===11),'server dirt outline');
+  const beforeDigRevision=bootstraps.at(-1).revision;
+  await page.mouse.down({button:'left'});
+  await waitFor(()=>destroys.some(d=>d.outcome==='changed'),'real browser survival mining');
+  await page.mouse.up({button:'left'});
+  assert.ok(destroys.some(d=>d.outcome==='active' && d.progress>0 && d.progress<1),'Server mining progress');
+  assert.ok(destroyRequests.some(d=>d.action==='hold'),'Physical hold renews operation');
+  await waitFor(async()=> (await state()).miningTargetRemoved===true,'real server dirt removed');
+  await waitFor(()=>bootstraps.at(-1).revision>beforeDigRevision,'post-mining world refresh');
+  await page.screenshot({path:resolve(evidence,'after-block-destroy.png')});
   await aim(0,25);
   await page.keyboard.down('w');
   await waitFor(async()=> (await state()).z>13.5,'walk to wall');
@@ -295,9 +316,10 @@ try {
   await writeFile(resolve(evidence,'result.json'),JSON.stringify({passed:true,fixture:ready.fixture,
     checks:['real-admission','terrain-snapshots','visible-target-selection','pointer-lock','WASD','wall-collision','jump-land',
       'mouse-look','authoritative-correction','cross-chunk-window','logout-release',
-      'browser-restart-persistent-registry','server-partial-lever-outline','number-key-hotbar','conserved-inventory','browser-right-click-use','real-lever-powered','post-use-revision-refresh'],
-    initial,wall,jumped,final,uses,leverOutline,hotbars,sectionParts:sections,revisions:bootstraps.map(b=>b.revision)},null,2));
-  console.log('Real browser / Minecraft movement and block-use smoke passed');
+      'browser-restart-persistent-registry','server-partial-lever-outline','number-key-hotbar','conserved-inventory','browser-right-click-use','real-lever-powered','post-use-revision-refresh',
+      'browser-left-hold-mining','server-mining-progress','real-dirt-removed','post-mining-revision-refresh'],
+    initial,wall,jumped,final,uses,destroys,destroyRequests,leverOutline,hotbars,sectionParts:sections,revisions:bootstraps.map(b=>b.revision)},null,2));
+  console.log('Real browser / Minecraft movement, block-use and mining smoke passed');
 } catch(error) {
   const selectionLabels = await page?.evaluate(()=>[...document.querySelectorAll('flt-semantics')]
     .flatMap(n=>[n.getAttribute('aria-label'),n.textContent]).filter(v=>v?.includes('3D 偵錯地形')).slice(0,8).map(v=>v.slice(0,256))).catch(()=>[]);

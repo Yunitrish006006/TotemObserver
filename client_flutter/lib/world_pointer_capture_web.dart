@@ -30,11 +30,16 @@ class _BrowserCapture implements WorldPointerCapture {
     }).toJS;
     _use = ((web.MouseEvent event) {
       if (event.button == 2 && _ownsCapture) onUse?.call();
+      if (event.button == 0 && _ownsCapture) onDestroy?.call(true);
+    }).toJS;
+    _up = ((web.MouseEvent event) {
+      if (event.button == 0 && _ownsCapture) onDestroy?.call(false);
     }).toJS;
     _contextMenu = ((web.Event event) {
       if (_ownsCapture) event.preventDefault();
     }).toJS;
     web.document.addEventListener('mousedown', _use);
+    web.document.addEventListener('mouseup', _up);
     web.document.addEventListener('contextmenu', _contextMenu);
     web.document.addEventListener('pointerlockchange', _change);
     web.document.addEventListener('pointerlockerror', _lost);
@@ -45,12 +50,20 @@ class _BrowserCapture implements WorldPointerCapture {
   final void Function(bool) onChanged;
   final void Function(double, double) onLook;
   final web.Element? _target = web.document.documentElement;
-  late final JSFunction _change, _lost, _visibility, _mouse, _use, _contextMenu;
+  late final JSFunction _change,
+      _lost,
+      _visibility,
+      _mouse,
+      _use,
+      _up,
+      _contextMenu;
   bool get _ownsCapture =>
       !_disposed && _wanted && web.document.pointerLockElement == _target;
   bool _disposed = false, _wanted = false;
   @override
   void Function()? onUse;
+  @override
+  void Function(bool)? onDestroy;
   @override
   bool get supported => _target != null;
   @override
@@ -88,7 +101,9 @@ class _BrowserCapture implements WorldPointerCapture {
     _wanted = false;
     _exitOwned();
     onUse = null;
+    onDestroy = null;
     web.document.removeEventListener('mousedown', _use);
+    web.document.removeEventListener('mouseup', _up);
     web.document.removeEventListener('contextmenu', _contextMenu);
     web.document.removeEventListener('pointerlockchange', _change);
     web.document.removeEventListener('pointerlockerror', _lost);
