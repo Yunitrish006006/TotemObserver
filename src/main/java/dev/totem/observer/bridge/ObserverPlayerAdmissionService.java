@@ -283,6 +283,26 @@ public final class ObserverPlayerAdmissionService implements AutoCloseable {
         }
     }
 
+    record HotbarResult(ObserverHotbar.Snapshot state) {}
+
+    CompletableFuture<HotbarResult> hotbar(Admission admission, String dimension, Integer slot, long receivedNanos,
+                                           BooleanSupplier sessionAuthorized) {
+        var result = new CompletableFuture<HotbarResult>();
+        execute(() -> {
+            try {
+                BooleanSupplier authorized = () -> nanoTime.getAsLong() - receivedNanos <= TimeUnit.MILLISECONDS.toNanos(250)
+                        && admission != null && valid(admission.playSession(), admission)
+                        && sessionAuthorized.getAsBoolean()
+                        && dimension.equals(admission.player().level().dimension().identifier().toString());
+                if (!authorized.getAsBoolean()) { result.complete(null); return; }
+                var state = slot == null ? ObserverHotbar.snapshot(admission.player(), authorized)
+                        : ObserverHotbar.select(admission.player(), slot, authorized);
+                result.complete(authorized.getAsBoolean() ? new HotbarResult(state) : null);
+            } catch (Throwable failure) { result.completeExceptionally(failure); }
+        });
+        return result;
+    }
+
     record TargetOutlineResult(WorldState state, double eyeY, int serverTick, ObserverTargetOutline.Snapshot target) {}
 
     CompletableFuture<TargetOutlineResult> targetOutline(Admission admission, String dimension, long receivedNanos,

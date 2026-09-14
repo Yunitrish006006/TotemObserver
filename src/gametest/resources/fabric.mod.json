@@ -47,7 +47,8 @@
       "dev.totem.observer.bridge.ObserverBlockUseProtocolGameTest",
       "dev.totem.observer.bridge.ObserverTargetOutlineGameTest",
       "dev.totem.observer.bridge.ObserverTargetOutlineProtocolGameTest",
-      "dev.totem.observer.bridge.ObserverHotbarGameTest"
+      "dev.totem.observer.bridge.ObserverHotbarGameTest",
+      "dev.totem.observer.bridge.ObserverHotbarProtocolGameTest"
     ]
   },
   "depends": {
