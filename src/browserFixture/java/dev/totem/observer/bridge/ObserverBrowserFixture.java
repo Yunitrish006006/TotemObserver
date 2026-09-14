@@ -49,7 +49,8 @@ public final class ObserverBrowserFixture implements ModInitializer {
             // Flat test world supplies empty space above this bounded floor and two-block-high wall.
             for (int x = -16; x < 32; x++) {
                 for (int z = 0; z < 48; z++) {
-                    level.setBlock(new BlockPos(x, 63, z), Blocks.STONE.defaultBlockState(), 3);
+                    // Nonzero registry page exercises persistent canonical-name reuse.
+                    level.setBlock(new BlockPos(x, 63, z), Blocks.COBBLESTONE.defaultBlockState(), 3);
                 }
             }
             for (int x = 0; x < 16; x++) {

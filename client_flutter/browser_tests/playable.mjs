@@ -60,9 +60,11 @@ async function state() {
 try {
   await waitFor(()=>existsSync(resolve(evidence,'ready.json')),'Minecraft bridge startup',180000);
   const ready=JSON.parse(await readFile(resolve(evidence,'ready.json'),'utf8'));
-  browser=await chromium.launch({headless:true,args:['--no-sandbox'],
-    executablePath:process.env.CHROME_BIN || (existsSync('/usr/bin/chromium')?'/usr/bin/chromium':undefined)});
-  page=await browser.newPage({viewport:{width:1100,height:1100}});
+  const profile=resolve(repo,'build/browser-playable/chromium-profile');
+  const browserOptions={headless:true,args:['--no-sandbox'],viewport:{width:1100,height:1100},
+    executablePath:process.env.CHROME_BIN || (existsSync('/usr/bin/chromium')?'/usr/bin/chromium':undefined)};
+  browser=await chromium.launchPersistentContext(profile,browserOptions);
+  page=await browser.newPage();
   const errors=[], corrections=[], bootstraps=[], requests=[], uses=[], useRequests=[], outlines=[];
   let sections=0; const floorParts=new Map();
   page.on('pageerror',()=>errors.push('runtime error'));
@@ -216,10 +218,71 @@ try {
   await page.getByRole('button',{name:'登出',exact:true}).click();
   await waitFor(async()=> (await state()).players===0,'logout releases real ServerPlayer');
   assert.equal(errors.length,0);
+  const cached=await page.evaluate(()=>new Promise((resolve,reject)=>{
+    const open=indexedDB.open('totem-observer-registry-v1',1);
+    open.onerror=()=>reject(new Error('Persistent registry missing'));
+    open.onsuccess=()=>{const db=open.result;
+      const request=db.transaction('cache').objectStore('cache').get('latest');
+      request.onerror=()=>{db.close();reject(new Error('Persistent registry read failed'));};
+      request.onsuccess=()=>{db.close();resolve(request.result);};
+    };
+  }));
+  assert.equal(cached.version,1);
+  assert.ok(cached.pages.length>1 && cached.pages.length<=256,'Bounded persisted decoded pages');
+  const savedOffsets=new Set(cached.pages.map(p=>p.offset));
+  assert.ok(cached.pages.some(p=>p.offset>0 && p.states.includes('minecraft:cobblestone')),
+    'The floor descriptor must be persisted on a nonzero page');
+  await browser.close();
+  browser=await chromium.launchPersistentContext(profile,browserOptions);
+  page=await browser.newPage();
+  const reopenedRequests=[]; let reopenedSections=0, validatedRegistry=false;
+  const secondCorrectionStart=corrections.length;
+  page.on('pageerror',()=>errors.push('reopened runtime error'));
+  page.on('websocket',socket=>{
+    socket.on('framesent',event=>{
+      const m=JSON.parse(event.payload.toString());
+      if(m.type==='world_registry') {reopenedRequests.push(m.offset);assert.ok(reopenedRequests.length<256);}
+    });
+    socket.on('framereceived',event=>{
+      const m=JSON.parse(event.payload.toString());
+      if(m.type==='world_registry' && m.offset===0) {
+        assert.equal(m.fingerprint,cached.fingerprint); validatedRegistry=true;
+      }
+      if(m.type==='world_section') reopenedSections++;
+      if(m.type==='world_movement') corrections.push(m);
+    });
+  });
+  await page.goto(`http://127.0.0.1:${http.address().port}`,{waitUntil:'networkidle'});
+  await page.waitForFunction(()=>document.querySelector('flt-semantics-placeholder')||document.querySelector('flt-semantics'));
+  await page.evaluate(()=>document.querySelector('flt-semantics-placeholder')?.click());
+  await fill('伺服器位址',`ws://127.0.0.1:${ready.port}/observer/bridge`);
+  await fill('帳號','playable_smoke'); await fill('密碼','isolated-browser-test-password');
+  await page.getByRole('button',{name:'登入',exact:true}).click();
+  await page.getByRole('button',{name:'點擊操作世界',exact:true}).waitFor({timeout:30000});
+  await waitFor(()=>validatedRegistry && reopenedSections>=4,'reopened authenticated world',30000);
+  const reopenedActivate=page.getByRole('button',{name:'點擊操作世界',exact:true});
+  const reopenedBox=await reopenedActivate.boundingBox();
+  mouseX=reopenedBox.x+reopenedBox.width/2; mouseY=reopenedBox.y+reopenedBox.height/2;
+  await reopenedActivate.click();
+  await page.waitForFunction(()=>document.pointerLockElement!==null);
+  await waitFor(()=>corrections.length>secondCorrectionStart,'reopened camera correction');
+  await aim(0,65);
+  await page.waitForFunction(()=>[...document.querySelectorAll('flt-semantics')]
+    .some(n=>[n.getAttribute('aria-label'),n.textContent].some(v=>v?.includes('準星選取 minecraft:cobblestone'))));
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(()=>document.pointerLockElement===null);
+  assert.ok(reopenedRequests.includes(0),'Fresh server fingerprint must be checked');
+  assert.ok(reopenedRequests.every(offset=>offset===0 || !savedOffsets.has(offset)),
+    'Browser restart must reuse previously decoded registry pages');
+  assert.equal(errors.length,0);
+  await writeFile(resolve(evidence,'persistent-registry-result.json'),JSON.stringify({passed:true,
+    storedPages:cached.pages.length,reopenedRequests,reopenedSections},null,2));
+  await page.getByRole('button',{name:'登出',exact:true}).click();
+  await waitFor(async()=> (await state()).players===0,'reopened logout releases player');
   await writeFile(resolve(evidence,'result.json'),JSON.stringify({passed:true,fixture:ready.fixture,
     checks:['real-admission','terrain-snapshots','visible-target-selection','pointer-lock','WASD','wall-collision','jump-land',
       'mouse-look','authoritative-correction','cross-chunk-window','logout-release',
-      'server-partial-lever-outline','empty-hand-fixture','browser-E-use','real-lever-powered','post-use-revision-refresh'],
+      'browser-restart-persistent-registry','server-partial-lever-outline','empty-hand-fixture','browser-E-use','real-lever-powered','post-use-revision-refresh'],
     initial,wall,jumped,final,uses,leverOutline,sectionParts:sections,revisions:bootstraps.map(b=>b.revision)},null,2));
   console.log('Real browser / Minecraft movement and block-use smoke passed');
 } catch(error) {
