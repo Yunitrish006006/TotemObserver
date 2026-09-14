@@ -3,6 +3,7 @@
   "package": "dev.totem.observer.mixin",
   "compatibilityLevel": "JAVA_25",
   "mixins": [
+    "ObserverDestroyTickMixin",
     "ObserverDestroyStateAccessor",
     "ObserverServerActionFirewallMixin",
     "ObserverNativeScreenPayloadsExtensionCapabilityMixin",

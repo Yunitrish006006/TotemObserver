@@ -12,14 +12,18 @@ Totem 全系列是最終相容範圍，包括 Core、Observer、Alchemy、Vanill
 | 2 | 自訂帳號、可撤銷連線會話；Flutter 最小連線介面 | 已實作，驗證結果見下；遊戲角色留在步驟 3 |
 | 3 | 固定 26.2 玩家接入與遊戲資料契約；確認瀏覽器核心相容性 | 進行中：固定玩家身分、session epoch 與 26.2 `ServerPlayer` admission/playerdata lifecycle 已實作；world sync / gameplay core 相容性未完成 |
 | 4 | 區塊/實體/資源/光照同步及網頁 3D 顯示 | 已有 bounded section/registry cache、debug voxel mesh 與 perspective scene；moving window 已實作，實體／正式資源／光照待完成 |
-| 5 | 移動、校正、挖放方塊與兩人互動 | 已有 server-authoritative intent/correction 與 first-person 輸入；完整 playable 串接、挖放與實體互動待完成 |
-| 6 | 背包、合成、容器、戰鬥、死亡/重生與維度生命週期 | 尚未實作 |
+| 5 | 移動、校正、挖放方塊與兩人互動 | 已有 server-authoritative intent/correction 與 first-person 輸入；真實 browser/server playable smoke 已通過；右鍵 lever/button 使用、1–9 選槽已接通；挖掘 driver/lifecycle 已實作，挖掘 wire、放置與實體互動待完成 |
+| 6 | 背包、合成、容器、戰鬥、死亡/重生與維度生命週期 | 已有 server hotbar snapshot/selection；完整 inventory、容器與其餘玩法待完成 |
 | 7 | 逐模組完整 Totem 相容；解決正式 Screen 渲染契約 | 尚未實作 |
 | 8 | 亮度對照、裝置/效能、完整部署與版本相容性驗收 | 尚未實作 |
 
 目前採用 Observer-owned server-authoritative world/gameplay contracts，保留 `totem-observer-account-v1` bridge。Browser 永遠不可信；`play:false` 不因 debug 3D 或移動能力而改成 true。各 slice 的正式驗證記錄在 stacked PR，未經明確授權不 merge。
 
-目前輸入與驗證界線見 [first-person input](world-first-person-input.md)、[movement protocol](world-movement-protocol.md)、[visible registry hydration](world-visible-registry-hydration.md)。瀏覽器 fixture 與 server GameTests 分別驗證各自邊界，仍需同一個真實 browser/server session 的 playable smoke。以下早期驗證保留原日期，不能當成後續功能的驗證證據。
+目前輸入與驗證界線見 [first-person input](world-first-person-input.md)、[movement protocol](world-movement-protocol.md)、[visible registry hydration](world-visible-registry-hydration.md)。已加入同一個真實 browser/server session 的 [playable smoke](browser-server-playable-smoke.md)，覆蓋登入、移動／碰撞／跳躍／轉向／校正、chunk window、右鍵使用與選槽。以下早期驗證保留原日期，不能當成後續功能的驗證證據。
+
+## 跨瀏覽器重啟資料生命週期
+
+[Persistent registry cache](persistent-registry-cache.md) 已讓相同 registry fingerprint 的 bounded canonical pages 在真正關閉／重開瀏覽器後重用。每次連線仍先讀 fresh authenticated page 0；visual metadata 不因 canonical fingerprint 相同而沿用。這尚未代表 section、解碼後 mesh 或正式資源的跨重啟快取完成。後續需分別建立資源版本、section content validation、增量世界更新與 eviction，不能把舊世界快照當成 server truth。
 
 ## 步驟 1 使用方式
 
@@ -79,9 +83,9 @@ Flutter analyze、5 項 Flutter UI/controller 測試與 release web 建置通過
 
 獨立審查要求補上帳號寫入的關閉等待與瀏覽器 heartbeat 回應期限，已修正並通過複查；測試 fixture 與 CI 串接另經只讀審查。沒有變更既有 Observer 正式 Screen、遊戲操作權限或生產世界。
 
-## 步驟 3 進度（進行中）
+## 步驟 3 初期紀錄（歷史，後續進度以上表為準）
 
-目前已把「帳號 → 固定伺服器身分 → authenticated play-session boundary → 真正 Minecraft 玩家生命週期」接通，但尚未開始區塊/3D/遊戲操作：
+以下記錄初期 admission slice 的驗證範圍；當時尚未開始區塊／3D／遊戲操作，後續已由上表的獨立 slices 推進：
 
 - 每個 Observer 帳號由伺服器導出固定、獨立命名空間的玩家 UUID 與 16 字元內 `obs_...` profile name；瀏覽器不能提交或覆寫 UUID、profile name 或 OP 狀態。
 - 每次 authenticated connection 建立新的 session epoch；相同帳號重連維持同一玩家 UUID/profile，但舊 epoch 與舊 admission 不能延用。
@@ -93,4 +97,4 @@ Flutter analyze、5 項 Flutter UI/controller 測試與 release web 建置通過
 - Server GameTest 覆蓋真正 PlayerList admission、相同帳號 replacement、vanilla playerdata 保存/重載，以及 stale release 不移除 replacement。GameTest runtime 本身把最大玩家數固定得很低，因此只在 gametest test mod 以專用 mixin 放寬 `GameTestServer#getMaxPlayers()`；production mixin 與 admission policy 不受影響。
 - Build 固定驗證另涵蓋 Java 單元測試、Flutter analyze/test/release web、真實 Chromium 註冊/登入/pong/登出/錯誤密碼/停服撤銷，以及 extraction invariants。admission 失敗會在伺服器端記錄 account 與 exception，但不記錄密碼、token 或 protocol payload。
 
-此階段仍不宣稱步驟 3 完成。下一個驗收點是讓另一個正常 Java 客戶端在 26.2 世界中觀察到已接入的 Observer 玩家，並完成瀏覽器 gameplay core / world-sync 路線的相容性判定；在這些驗收通過前不開始宣稱區塊、3D 或可遊玩支援，也不把 `play` 改為 `true`。
+當時此階段仍不宣稱步驟 3 完成。當時下一個驗收點是讓另一個正常 Java 客戶端在 26.2 世界中觀察到已接入的 Observer 玩家，並完成瀏覽器 gameplay core / world-sync 路線的相容性判定；在這些驗收通過前不開始宣稱區塊、3D 或可遊玩支援，也不把 `play` 改為 `true`。

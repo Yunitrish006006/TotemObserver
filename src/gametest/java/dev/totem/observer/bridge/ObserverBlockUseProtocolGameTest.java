@@ -207,7 +207,9 @@ public final class ObserverBlockUseProtocolGameTest {
 
         JsonObject take(String type) throws Exception {
             var value = messages.poll(8, TimeUnit.SECONDS);
-            require(value != null && type.equals(value.get("type").getAsString()), "Unexpected block-use fixture response: " + type);
+            require(value != null && type.equals(value.get("type").getAsString()),
+                    "Expected block-use fixture response " + type + ", received "
+                            + (value == null ? "<timeout>" : value.get("type")));
             return value;
         }
     }
