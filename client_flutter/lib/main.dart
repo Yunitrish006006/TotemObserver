@@ -214,9 +214,9 @@ class _ConnectionPageState extends State<ConnectionPage> {
                                   ? visibleWorld.resolvedCount ==
                                             visibleWorld.targetCount
                                         ? connection.canMove
-                                              ? '伺服器支援移動；目前顯示附近地形，挖掘與物品操作尚未開放。'
+                                              ? '附近地形已載入；點擊操作世界後可使用下方標示的操作。'
                                               : '附近地形已載入；伺服器尚未提供移動功能。'
-                                        : '正在載入附近地形；挖掘與物品操作尚未開放。'
+                                        : '正在載入附近地形。'
                                   : '已取得伺服器權威角色快照；區塊同步、畫面與遊戲操作仍未啟用。'
                             : connection.playerAttached
                             ? '角色已存在於伺服器世界並使用原版 playerdata；區塊畫面與遊戲操作仍在開發中。'

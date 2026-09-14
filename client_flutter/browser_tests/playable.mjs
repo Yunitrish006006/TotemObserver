@@ -218,6 +218,10 @@ try {
   assert.ok(destroyRequests.some(d=>d.action==='hold'),'Physical hold renews operation');
   await waitFor(async()=> (await state()).miningTargetRemoved===true,'real server dirt removed');
   await waitFor(()=>bootstraps.at(-1).revision>beforeDigRevision,'post-mining world refresh');
+  const digBootstrap=bootstraps.at(-1);
+  await waitFor(()=>floorParts.get(`${digBootstrap.revision}:0:0`)?.size===4,
+    'post-mining floor section',30000);
+  await page.waitForTimeout(500);
   await page.screenshot({path:resolve(evidence,'after-block-destroy.png')});
   await aim(0,25);
   await page.keyboard.down('w');
