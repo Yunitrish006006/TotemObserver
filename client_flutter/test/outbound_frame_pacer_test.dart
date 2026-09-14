@@ -1,7 +1,110 @@
+import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:totem_observer_client/outbound_frame_pacer.dart';
 
 void main() {
+  test('background wakeup can send reentrantly and stops after close', () {
+    late OutboundFramePacer pacer;
+    late ManualPeriodicTimer timer;
+    int wakes = 0;
+    final writes = <String>[];
+    pacer = OutboundFramePacer(
+      write: writes.add,
+      onError: () => fail('unexpected error'),
+      createPeriodicTimer: (_, callback) =>
+          timer = ManualPeriodicTimer(callback),
+      onBackgroundAvailable: () {
+        wakes++;
+        expect(pacer.canSendBackgroundImmediately, isTrue);
+        pacer.send('background-$wakes');
+      },
+    );
+    for (int i = 0; i < 6; i++) pacer.send('initial-$i');
+    timer.fire(1);
+    expect(wakes, 1);
+    expect(pacer.canSendBackgroundImmediately, isFalse);
+    timer.fire(2);
+    expect(wakes, 2);
+    expect(writes.sublist(6), ['background-1', 'background-2']);
+    pacer.close();
+    timer.fire(3);
+    expect(wakes, 2);
+  });
+  test(
+    'missed timer callbacks replenish bounded elapsed credit and retain FIFO',
+    () {
+      final writes = <String>[];
+      int backgroundWakeups = 0;
+      late ManualPeriodicTimer timer;
+      final pacer = OutboundFramePacer(
+        write: writes.add,
+        onError: () => fail('unexpected overflow'),
+        onBackgroundAvailable: () => backgroundWakeups++,
+        createPeriodicTimer: (_, callback) =>
+            timer = ManualPeriodicTimer(callback),
+      );
+      for (int i = 0; i < 16; i++) pacer.send('$i');
+      expect(writes.length, 8);
+      // A suspended browser returns after six seconds. It gets eight tokens,
+      // not one token and not a burst of one hundred queued messages.
+      timer.fire(100);
+      expect(writes, List.generate(16, (i) => '$i'));
+      expect(pacer.canSendImmediately, isFalse);
+      timer.fire(101);
+      expect(pacer.canSendImmediately, isTrue);
+      expect(pacer.canSendBackgroundImmediately, isFalse);
+      pacer.send('fresh-input');
+      expect(writes.last, 'fresh-input');
+      timer.fire(104);
+      expect(pacer.canSendBackgroundImmediately, isTrue);
+      expect(backgroundWakeups, 1);
+      pacer.send('background');
+      expect(pacer.canSendBackgroundImmediately, isFalse);
+      expect(pacer.canSendImmediately, isTrue);
+      pacer.close();
+      timer.fire(200);
+      expect(backgroundWakeups, 1);
+    },
+  );
+
+  testWidgets(
+    'continuous fresh input and background work both receive bounded service',
+    (tester) async {
+      int now = 0, input = 0, background = 0;
+      final times = <int>[];
+      final pacer = OutboundFramePacer(
+        write: (_) => times.add(now),
+        onError: () => fail('overflow'),
+      );
+      // Poll background first to model scheduler notification order.
+      for (int i = 0; i < 1000; i++) {
+        if (pacer.canSendBackgroundImmediately) {
+          pacer.send('world-data');
+          background++;
+        }
+        if (i % 10 == 0) {
+          expect(
+            pacer.canSendImmediately,
+            isTrue,
+            reason: 'Input at $now must not starve',
+          );
+          pacer.send('fresh-input');
+          input++;
+        }
+        now += 10;
+        await tester.pump(const Duration(milliseconds: 10));
+      }
+      expect(input, 100);
+      expect(background, greaterThan(50));
+      for (final t in times) {
+        expect(
+          times.where((v) => v >= t && v <= t + 1000).length,
+          lessThanOrEqualTo(25),
+        );
+      }
+      pacer.close();
+    },
+  );
   testWidgets('mixed requests retain FIFO and bounded sliding-window rate', (
     tester,
   ) async {
@@ -84,4 +187,22 @@ void main() {
       expect(writes.length, 16);
     },
   );
+}
+
+class ManualPeriodicTimer implements Timer {
+  ManualPeriodicTimer(this.callback);
+  final void Function(Timer) callback;
+  @override
+  int tick = 0;
+  @override
+  bool isActive = true;
+  void fire(int elapsedTicks) {
+    tick = elapsedTicks;
+    if (isActive) callback(this);
+  }
+
+  @override
+  void cancel() {
+    isActive = false;
+  }
 }

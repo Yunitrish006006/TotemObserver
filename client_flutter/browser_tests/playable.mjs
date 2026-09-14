@@ -17,7 +17,7 @@ assert.equal(existsSync(evidence) || existsSync(runDir),false,'Archive the previ
 await mkdir(evidence,{recursive:true}); await mkdir(runDir,{recursive:true});
 await writeFile(resolve(runDir,'eula.txt'),'eula=true\n');
 await writeFile(resolve(runDir,'server.properties'),[
-  'online-mode=false','server-ip=127.0.0.1','server-port=0','spawn-protection=0',
+  'online-mode=false','server-ip=127.0.0.1','server-port=0','spawn-protection=16',
   'gamemode=survival','difficulty=peaceful','view-distance=2','simulation-distance=2',
   'max-players=2','level-type=minecraft:flat',
   'generator-settings={"layers":[{"block":"minecraft:bedrock","height":1}],"biome":"minecraft:plains"}',
@@ -60,6 +60,8 @@ async function state() {
 try {
   await waitFor(()=>existsSync(resolve(evidence,'ready.json')),'Minecraft bridge startup',180000);
   const ready=JSON.parse(await readFile(resolve(evidence,'ready.json'),'utf8'));
+  const placementProtection=JSON.parse(await readFile(resolve(evidence,'placement-protection-result.json'),'utf8'));
+  assert.equal(placementProtection.passed,true);
   const profile=resolve(repo,'build/browser-playable/chromium-profile');
   const browserOptions={headless:true,args:['--no-sandbox'],viewport:{width:1100,height:1100},
     executablePath:process.env.CHROME_BIN || (existsSync('/usr/bin/chromium')?'/usr/bin/chromium':undefined)};
@@ -321,7 +323,8 @@ try {
     checks:['real-admission','terrain-snapshots','visible-target-selection','pointer-lock','WASD','wall-collision','jump-land',
       'mouse-look','authoritative-correction','cross-chunk-window','logout-release',
       'browser-restart-persistent-registry','server-partial-lever-outline','number-key-hotbar','conserved-inventory','browser-right-click-use','real-lever-powered','post-use-revision-refresh',
-      'browser-left-hold-mining','server-mining-progress','real-dirt-removed','post-mining-revision-refresh'],
+      'browser-left-hold-mining','server-mining-progress','real-dirt-removed','post-mining-revision-refresh',
+      'dedicated-placement-spawn-protection'],
     initial,wall,jumped,final,uses,destroys,destroyRequests,leverOutline,hotbars,sectionParts:sections,revisions:bootstraps.map(b=>b.revision)},null,2));
   console.log('Real browser / Minecraft movement, block-use and mining smoke passed');
 } catch(error) {

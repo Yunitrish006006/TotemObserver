@@ -52,7 +52,8 @@
       "dev.totem.observer.bridge.ObserverDestroyDriverGameTest",
       "dev.totem.observer.bridge.ObserverDestroyLifecycleGameTest",
       "dev.totem.observer.bridge.ObserverDestroyProtocolGameTest",
-      "dev.totem.observer.bridge.ObserverBlockPlacementGameTest"
+      "dev.totem.observer.bridge.ObserverBlockPlacementGameTest",
+      "dev.totem.observer.bridge.ObserverPlacementLifecycleGameTest"
     ]
   },
   "depends": {

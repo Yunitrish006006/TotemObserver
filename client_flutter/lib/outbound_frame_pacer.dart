@@ -5,19 +5,31 @@ import 'dart:collection';
 /// Eight initial tokens plus at most 17 refills in any second remain below
 /// the server's 32-frame window. Sequence order is never changed.
 class OutboundFramePacer {
-  OutboundFramePacer({required this.write, required this.onError});
+  OutboundFramePacer({
+    required this.write,
+    required this.onError,
+    this.onBackgroundAvailable,
+    this.createPeriodicTimer = Timer.periodic,
+  });
 
   static const capacity = 8;
   static const maxQueued = 8;
   static const interval = Duration(milliseconds: 60);
   final void Function(String) write;
   final void Function() onError;
+  final void Function()? onBackgroundAvailable;
+  final Timer Function(Duration, void Function(Timer)) createPeriodicTimer;
   final Queue<String> _queue = Queue();
   int _tokens = capacity;
   Timer? _timer;
+  int _timerTicks = 0;
   bool _closed = false;
 
   bool get canSendImmediately => !_closed && _tokens > 0 && _queue.isEmpty;
+
+  /// Background reads leave room for fresh input without reordering any sequence.
+  bool get canSendBackgroundImmediately =>
+      !_closed && _tokens > 2 && _queue.isEmpty;
 
   void send(String message) {
     if (_closed) return;
@@ -26,14 +38,27 @@ class OutboundFramePacer {
       return;
     }
     _queue.addLast(message);
-    _timer ??= Timer.periodic(interval, (_) {
-      if (_tokens < capacity) _tokens++;
-      _drain();
-      if (_tokens == capacity && _queue.isEmpty) {
-        _timer?.cancel();
-        _timer = null;
-      }
-    });
+    if (_timer == null) {
+      _timerTicks = 0;
+      _timer = createPeriodicTimer(interval, (timer) {
+        final backgroundWasAvailable = canSendBackgroundImmediately;
+        // Timer.tick counts elapsed intervals, including missed callbacks when
+        // rendering delays the event loop. Credit remains capped at eight.
+        final elapsedTicks = timer.tick - _timerTicks;
+        _timerTicks = timer.tick;
+        if (elapsedTicks > 0) {
+          _tokens = (_tokens + elapsedTicks).clamp(0, capacity);
+        }
+        _drain();
+        if (!backgroundWasAvailable && canSendBackgroundImmediately) {
+          onBackgroundAvailable?.call();
+        }
+        if (_tokens == capacity && _queue.isEmpty) {
+          _timer?.cancel();
+          _timer = null;
+        }
+      });
+    }
     _drain();
   }
 

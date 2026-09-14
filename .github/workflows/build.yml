@@ -111,6 +111,7 @@ jobs:
             build/account-browser-evidence/movement-input-result.json
             build/browser-playable/results/*.png
             build/browser-playable/results/result.json
+            build/browser-playable/results/placement-protection-result.json
             build/browser-playable/results/server.log
 
       - name: Enforce Observer extraction invariants

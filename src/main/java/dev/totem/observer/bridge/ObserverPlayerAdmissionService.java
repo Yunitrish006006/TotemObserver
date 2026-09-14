@@ -145,6 +145,11 @@ public final class ObserverPlayerAdmissionService implements AutoCloseable {
 
     private final MinecraftServer server;
     private final LongSupplier nanoTime;
+    @FunctionalInterface
+    interface PlacementAction {
+        ObserverBlockPlacement.Result place(ServerPlayer player, BooleanSupplier authorized);
+    }
+    private final PlacementAction placementAction;
     private final Map<String, Active> active = new ConcurrentHashMap<>();
     /** Server-thread only; pending spawn preparation is advanced once per Minecraft tick. */
     private final Map<String, Pending> pending = new HashMap<>();
@@ -160,8 +165,14 @@ public final class ObserverPlayerAdmissionService implements AutoCloseable {
 
     /** Package-private monotonic clock seam for deterministic deadline tests. */
     ObserverPlayerAdmissionService(MinecraftServer server, LongSupplier nanoTime) {
+        this(server, nanoTime, ObserverBlockPlacement::place);
+    }
+
+    /** Package-private action seam verifies cleanup after vanilla has already mutated state. */
+    ObserverPlayerAdmissionService(MinecraftServer server, LongSupplier nanoTime, PlacementAction placementAction) {
         this.server = Objects.requireNonNull(server, "server");
         this.nanoTime = Objects.requireNonNull(nanoTime, "nanoTime");
+        this.placementAction = Objects.requireNonNull(placementAction, "placementAction");
         // Publish only after all instance fields, including server, are initialized.
         TICKING.add(this);
     }
@@ -248,6 +259,53 @@ public final class ObserverPlayerAdmissionService implements AutoCloseable {
                 cancelDestruction(admission);
                 result.complete(ObserverBlockUse.use(admission.player(), authorized));
             } catch (Throwable failure) {
+                result.completeExceptionally(failure);
+            }
+        });
+        return result;
+    }
+
+    record PlacementResult(ObserverBlockPlacement.Result state, boolean refreshRequired) {}
+
+    /** Internal owner entrypoint. Transport must serialize requests and honor the refresh barrier. */
+    CompletableFuture<PlacementResult> placeBlock(Admission admission, String dimension, long receivedNanos,
+                                                 BooleanSupplier sessionAuthorized) {
+        var result = new CompletableFuture<PlacementResult>();
+        execute(() -> {
+            try {
+                BooleanSupplier authorized = () -> {
+                    long age = nanoTime.getAsLong() - receivedNanos;
+                    return age >= 0 && age <= TimeUnit.MILLISECONDS.toNanos(250)
+                            && admission != null && valid(admission.playSession(), admission)
+                            && sessionAuthorized.getAsBoolean() && dimension != null
+                            && dimension.equals(admission.player().level().dimension().identifier().toString());
+                };
+                if (!authorized.getAsBoolean()) { result.complete(null); return; }
+                var motion = motions.get(admission);
+                if (motion != null) {
+                    if (motion.response != null) { result.complete(null); return; }
+                    motion.input = ObserverMovementIntent.idle(admission.player().getYRot(), admission.player().getXRot());
+                    motion.inputTime = receivedNanos;
+                }
+                var mining = destruction.get(admission);
+                if (mining != null) {
+                    mining.cancelCurrent();
+                    result.complete(new PlacementResult(new ObserverBlockPlacement.Result(
+                            ObserverBlockPlacement.Outcome.DENIED, null,
+                            mining.snapshot().result().worldMayHaveChanged()), true));
+                    return; // Consume the mining owner through bootstrap before attempting placement.
+                }
+                var placed = placementAction.place(admission.player(), authorized);
+                if (!authorized.getAsBoolean()) {
+                    throw new IllegalStateException("Placement authorization expired during vanilla action");
+                }
+                result.complete(new PlacementResult(placed, placed.worldMayHaveChanged()));
+            } catch (Throwable failure) {
+                // Vanilla may throw after block/inventory callbacks. Never retain a usable admission.
+                var current = admission == null ? null : active.get(admission.playSession().account());
+                try {
+                    if (current != null && current.admission().equals(admission)) removeNow(current);
+                } catch (Throwable cleanupFailure) { failure.addSuppressed(cleanupFailure); }
                 result.completeExceptionally(failure);
             }
         });
