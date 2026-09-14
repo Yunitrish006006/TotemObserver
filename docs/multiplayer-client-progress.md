@@ -11,13 +11,15 @@ Totem 全系列是最終相容範圍，包括 Core、Observer、Alchemy、Vanill
 | 1 | Observer 內嵌雙向連線、版本握手、限額與生命週期；固定自動測試 | 已實作，驗證結果見下 |
 | 2 | 自訂帳號、可撤銷連線會話；Flutter 最小連線介面 | 已實作，驗證結果見下；遊戲角色留在步驟 3 |
 | 3 | 固定 26.2 玩家接入與遊戲資料契約；確認瀏覽器核心相容性 | 進行中：固定玩家身分、session epoch 與 26.2 `ServerPlayer` admission/playerdata lifecycle 已實作；world sync / gameplay core 相容性未完成 |
-| 4 | 區塊/實體/資源/光照同步及網頁 3D 顯示 | 尚未實作 |
-| 5 | 移動、校正、挖放方塊與兩人互動 | 尚未實作 |
+| 4 | 區塊/實體/資源/光照同步及網頁 3D 顯示 | 已有 bounded section/registry cache、debug voxel mesh 與 perspective scene；moving window、實體／正式資源／光照待完成 |
+| 5 | 移動、校正、挖放方塊與兩人互動 | 已有 server-authoritative intent/correction 與 first-person 輸入；完整 playable 串接、挖放與實體互動待完成 |
 | 6 | 背包、合成、容器、戰鬥、死亡/重生與維度生命週期 | 尚未實作 |
 | 7 | 逐模組完整 Totem 相容；解決正式 Screen 渲染契約 | 尚未實作 |
 | 8 | 亮度對照、裝置/效能、完整部署與版本相容性驗收 | 尚未實作 |
 
-步驟 1 不決定後續採原生 Minecraft 封包轉接或專用遊戲協定。`bootstrap-v1` 是短期傳輸驗證，不承諾為未來 play 協定的相容基礎。原生客戶端 26.2 支援與正式 Screen 問題仍依 [可行性調查](flutter-client-feasibility.md) 處理。
+目前採用 Observer-owned server-authoritative world/gameplay contracts，保留 `totem-observer-account-v1` bridge。Browser 永遠不可信；`play:false` 不因 debug 3D 或移動能力而改成 true。各 slice 的正式驗證記錄在 stacked PR，未經明確授權不 merge。
+
+目前輸入與驗證界線見 [first-person input](world-first-person-input.md)、[movement protocol](world-movement-protocol.md)、[visible registry hydration](world-visible-registry-hydration.md)。瀏覽器 fixture 與 server GameTests 分別驗證各自邊界，仍需 moving window 與同一個真實 browser/server session 的 playable smoke。以下早期驗證保留原日期，不能當成後續功能的驗證證據。
 
 ## 步驟 1 使用方式
 

@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 
 import 'connection.dart';
-import 'world_debug_slice.dart';
+import 'world_debug_scene.dart';
 import 'world_section_scheduler.dart';
 import 'world_visible_view.dart';
+import 'world_movement_controls.dart';
 
 void main() => runApp(const ObserverApp());
 
@@ -99,7 +100,7 @@ class _ConnectionPageState extends State<ConnectionPage> {
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(16),
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 448),
+            constraints: const BoxConstraints(maxWidth: 960),
             child: AnimatedBuilder(
               animation: connection,
               builder: (context, _) {
@@ -194,9 +195,12 @@ class _ConnectionPageState extends State<ConnectionPage> {
                           textAlign: TextAlign.center,
                         ),
                         const SizedBox(height: 12),
-                        WorldDebugSliceView(
+                        WorldMovementControls(
                           connection: connection,
-                          plan: visibleWorld.plan!,
+                          child: WorldDebugSceneView(
+                            connection: connection,
+                            plan: visibleWorld.plan!,
+                          ),
                         ),
                       ],
                       const SizedBox(height: 16),
@@ -205,8 +209,10 @@ class _ConnectionPageState extends State<ConnectionPage> {
                             ? visibleWorld.hasPlan
                                   ? visibleWorld.resolvedCount ==
                                             visibleWorld.targetCount
-                                        ? '已建立受限的伺服器權威世界快取；目前顯示 raw BlockState 偵錯切片，正式畫面與遊戲操作仍未啟用。'
-                                        : '正在建立受限的伺服器權威世界快取；目前顯示 raw BlockState 偵錯切片，正式畫面與遊戲操作仍未啟用。'
+                                        ? connection.canMove
+                                              ? '伺服器支援移動；目前顯示附近地形，挖掘與物品操作尚未開放。'
+                                              : '附近地形已載入；伺服器尚未提供移動功能。'
+                                        : '正在載入附近地形；挖掘與物品操作尚未開放。'
                                   : '已取得伺服器權威角色快照；區塊同步、畫面與遊戲操作仍未啟用。'
                             : connection.playerAttached
                             ? '角色已存在於伺服器世界並使用原版 playerdata；區塊畫面與遊戲操作仍在開發中。'

@@ -107,6 +107,22 @@ class ObserverConnection extends ChangeNotifier {
   BridgeTransport? _transport;
   StreamSubscription<dynamic>? _subscription;
   Timer? _deadline, _heartbeat, _responseDeadline;
+  Timer? _movementDeadline, _movementCooldown, _registryDeadline;
+  Timer? _sectionCooldown, _registryCooldown;
+  bool get canSendWorldSectionNow => !(_sectionCooldown?.isActive ?? false);
+  int _worldMovementProtocol = 0, _pendingMovementSequence = -1;
+  int _lastMovementServerTick = -1, _worldGeometryRevision = 0;
+  int get worldGeometryRevision => _worldGeometryRevision;
+  bool lastMovementApplied = false, worldOnGround = false;
+  bool get canMove =>
+      phase == ConnectionPhase.connected &&
+      playerAttached &&
+      _worldMovementProtocol == 1 &&
+      hasWorldState &&
+      hasWorldBootstrap &&
+      worldDimension == bootstrapDimension;
+  bool get movementPending => _pendingMovementSequence >= 0;
+
   int _generation = 0,
       _sequence = 0,
       _lastPong = -1,
@@ -277,6 +293,18 @@ class ObserverConnection extends ChangeNotifier {
               worldRegistryProtocol != 1) {
             throw const FormatException();
           }
+          final worldMovementProtocol = message['worldMovementProtocol'];
+          if (worldMovementProtocol != null &&
+              (worldMovementProtocol is! int ||
+                  (worldMovementProtocol != 0 && worldMovementProtocol != 1)))
+            throw const FormatException();
+          if (worldMovementProtocol == 1 &&
+              (playerAdmission != true ||
+                  identityProtocol != 1 ||
+                  worldBootstrapProtocol != 1 ||
+                  worldStateProtocol != 1))
+            throw const FormatException();
+          _worldMovementProtocol = worldMovementProtocol == 1 ? 1 : 0;
           final worldSectionProtocol = message['worldSectionProtocol'];
           if (worldSectionProtocol != null &&
               worldSectionProtocol != 0 &&
@@ -353,6 +381,72 @@ class ObserverConnection extends ChangeNotifier {
           }
           if (_worldStateProtocol == 1 && playerAttached) _requestWorldState();
           ping();
+        case 'world_movement':
+          const keys = {
+            'type',
+            'protocol',
+            'seq',
+            'sessionEpoch',
+            'subscriptionId',
+            'revision',
+            'serverTick',
+            'applied',
+            'onGround',
+            'dimension',
+            'x',
+            'y',
+            'z',
+            'yaw',
+            'pitch',
+          };
+          final serverTick = message['serverTick'];
+          final x = message['x'], y = message['y'], z = message['z'];
+          final yaw = message['yaw'], pitch = message['pitch'];
+          if (!canMove ||
+              !movementPending ||
+              message.length != keys.length ||
+              !message.keys.every(keys.contains) ||
+              ![
+                'protocol',
+                'seq',
+                'sessionEpoch',
+                'subscriptionId',
+                'revision',
+              ].every((key) => message[key] is int) ||
+              message['protocol'] != 1 ||
+              message['seq'] != _pendingMovementSequence ||
+              message['sessionEpoch'] != sessionEpoch ||
+              message['subscriptionId'] != bootstrapSubscriptionId ||
+              message['revision'] != bootstrapRevision ||
+              message['dimension'] != bootstrapDimension ||
+              serverTick is! int ||
+              serverTick < 0 ||
+              serverTick <= _lastMovementServerTick ||
+              message['applied'] is! bool ||
+              message['onGround'] is! bool ||
+              x is! num ||
+              y is! num ||
+              z is! num ||
+              yaw is! num ||
+              pitch is! num ||
+              ![x, y, z, yaw, pitch].every((v) => v.toDouble().isFinite) ||
+              x.abs() > 32000000 ||
+              z.abs() > 32000000 ||
+              y.abs() > 8192 ||
+              pitch < -90 ||
+              pitch > 90)
+            throw const FormatException();
+          _pendingMovementSequence = -1;
+          _movementDeadline?.cancel();
+          _lastMovementServerTick = serverTick;
+          lastMovementApplied = message['applied'] as bool;
+          worldOnGround = message['onGround'] as bool;
+          worldX = x.toDouble();
+          worldY = y.toDouble();
+          worldZ = z.toDouble();
+          worldYaw = yaw.toDouble();
+          worldPitch = pitch.toDouble();
+          _notify();
         case 'world_state':
           final seq = message['seq'];
           final epoch = message['sessionEpoch'];
@@ -450,6 +544,7 @@ class ObserverConnection extends ChangeNotifier {
           }
           _pendingWorldBootstrapSequence = -1;
           _pendingWorldSection = null;
+          _worldGeometryRevision++;
           _worldSections.clear();
           _unavailableWorldSections.clear();
           bootstrapSubscriptionId = subscriptionId;
@@ -507,8 +602,11 @@ class ObserverConnection extends ChangeNotifier {
               total != registryTotal) {
             throw const FormatException();
           }
+          _registryDeadline?.cancel();
+          _registryDeadline = null;
           _pendingWorldRegistrySequence = -1;
           _pendingWorldRegistryOffset = -1;
+          _worldGeometryRevision++;
           for (int i = 0; i < states.length; i++) {
             _blockStateNames[offset + i] = states[i] as String;
           }
@@ -568,6 +666,7 @@ class ObserverConnection extends ChangeNotifier {
               stateIds: stateIds,
             );
             _unavailableWorldSections.remove(pending.key);
+            _worldGeometryRevision++;
             _worldSections[pending.key] = snapshot;
             _pendingWorldSection = null;
             _notify();
@@ -608,6 +707,7 @@ class ObserverConnection extends ChangeNotifier {
             throw const FormatException();
           }
           _pendingWorldSection = null;
+          _worldGeometryRevision++;
           _worldSections.remove(pending.key);
           _unavailableWorldSections.add(pending.key);
           _notify();
@@ -635,6 +735,58 @@ class ObserverConnection extends ChangeNotifier {
     }
   }
 
+  /// Sends intent only. The response replaces authoritative state; no local XYZ prediction.
+  bool sendMovement({
+    required int strafe,
+    required int forward,
+    required double yaw,
+    required double pitch,
+    required bool jump,
+  }) {
+    if (!canMove ||
+        movementPending ||
+        _pendingWorldBootstrapSequence >= 0 ||
+        (_movementCooldown?.isActive ?? false))
+      return false;
+    if (strafe < -1 ||
+        strafe > 1 ||
+        forward < -1 ||
+        forward > 1 ||
+        !yaw.isFinite ||
+        !pitch.isFinite)
+      return false;
+    final wrappedYaw = ((yaw + 180) % 360) - 180;
+    try {
+      final seq = _sequence++;
+      _pendingMovementSequence = seq;
+      _movementCooldown = Timer(const Duration(milliseconds: 100), () {});
+      _movementDeadline = Timer(
+        const Duration(seconds: 5),
+        () => _fail('移動回應逾時，連線已結束'),
+      );
+      _transport!.send(
+        jsonEncode({
+          'type': 'world_movement',
+          'protocol': 1,
+          'seq': seq,
+          'sessionEpoch': sessionEpoch,
+          'subscriptionId': bootstrapSubscriptionId,
+          'revision': bootstrapRevision,
+          'dimension': bootstrapDimension,
+          'strafe': strafe,
+          'forward': forward,
+          'yaw': (wrappedYaw * 100).round(),
+          'pitch': (pitch.clamp(-90, 90) * 100).round(),
+          'jump': jump ? 1 : 0,
+        }),
+      );
+      return true;
+    } catch (_) {
+      _fail('連線已中斷');
+      return false;
+    }
+  }
+
   void _requestWorldState() {
     if (phase != ConnectionPhase.connected ||
         _worldStateProtocol != 1 ||
@@ -656,6 +808,7 @@ class ObserverConnection extends ChangeNotifier {
         _worldBootstrapProtocol != 1 ||
         !playerAttached ||
         _pendingWorldBootstrapSequence >= 0 ||
+        movementPending ||
         _pendingWorldSection != null) {
       return;
     }
@@ -673,6 +826,7 @@ class ObserverConnection extends ChangeNotifier {
         _worldRegistryProtocol != 1 ||
         !playerAttached ||
         offset < 0 ||
+        (_registryCooldown?.isActive ?? false) ||
         _pendingWorldRegistrySequence >= 0) {
       return;
     }
@@ -680,6 +834,13 @@ class ObserverConnection extends ChangeNotifier {
       final seq = _sequence++;
       _pendingWorldRegistrySequence = seq;
       _pendingWorldRegistryOffset = offset;
+      if (_worldMovementProtocol == 1) {
+        _registryCooldown = Timer(const Duration(milliseconds: 300), () {});
+      }
+      _registryDeadline = Timer(
+        const Duration(seconds: 5),
+        () => _fail('方塊資料回應逾時，連線已結束'),
+      );
       _transport?.send(
         jsonEncode({'type': 'world_registry', 'seq': seq, 'offset': offset}),
       );
@@ -700,6 +861,7 @@ class ObserverConnection extends ChangeNotifier {
 
   void requestWorldSection(int chunkX, int chunkZ, int sectionY) {
     if (!canRequestWorldSections ||
+        !canSendWorldSectionNow ||
         phase != ConnectionPhase.connected ||
         !playerAttached ||
         _pendingWorldSection != null ||
@@ -728,6 +890,9 @@ class ObserverConnection extends ChangeNotifier {
     }
     try {
       final seq = _sequence++;
+      if (_worldMovementProtocol == 1) {
+        _sectionCooldown = Timer(const Duration(milliseconds: 300), _notify);
+      }
       _pendingWorldSection = _WorldSectionAssembly(
         sequence: seq,
         key: key,
@@ -821,6 +986,17 @@ class ObserverConnection extends ChangeNotifier {
       } catch (_) {}
     }
     _generation++;
+    _worldGeometryRevision++;
+    _movementDeadline?.cancel();
+    _registryDeadline?.cancel();
+    _registryCooldown?.cancel();
+    _sectionCooldown?.cancel();
+    _movementCooldown?.cancel();
+    _pendingMovementSequence = -1;
+    _lastMovementServerTick = -1;
+    _worldMovementProtocol = 0;
+    lastMovementApplied = false;
+    worldOnGround = false;
     _deadline?.cancel();
     _heartbeat?.cancel();
     _responseDeadline?.cancel();

@@ -25,6 +25,9 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
     private ObserverPlayerAdmissionService.Admission playerAdmission;
     private boolean selected, pending, ended, worldStatePending, worldBootstrapPending, worldSectionPending;
     private long sequence = -1;
+    private boolean movementPending;
+    private long lastMovementNanos;
+    private io.netty.util.concurrent.ScheduledFuture<?> movementDeadline;
     private int worldSubscriptionId, worldBootstrapRevision;
     private int worldBootstrapMinY, worldBootstrapHeight, worldBootstrapCenterChunkX, worldBootstrapCenterChunkZ;
     private String worldBootstrapDimension;
@@ -48,6 +51,7 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
                     + ",\"worldBootstrapProtocol\":" + (playerAdmissions == null ? 0 : WORLD_BOOTSTRAP_PROTOCOL)
                     + ",\"worldRegistryProtocol\":" + (playerAdmissions == null ? 0 : ObserverBlockStateRegistry.PROTOCOL)
                     + ",\"worldSectionProtocol\":" + (playerAdmissions == null ? 0 : ObserverWorldSectionCodec.PROTOCOL)
+                    + ",\"worldMovementProtocol\":" + (playerAdmissions == null ? 0 : ObserverMovementRequest.PROTOCOL)
                     + ",\"play\":false}");
             deadline = ctx.executor().schedule(() -> stop(ctx, "Login timed out"), 10, TimeUnit.SECONDS);
         } else if (selected && event instanceof IdleStateEvent) stop(ctx, "Connection idle");
@@ -84,6 +88,10 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
             if ("logout".equals(type) && message.size() == 1) {
                 send(ctx, "{\"type\":\"logged_out\"}"); stop(ctx, "Logged out"); return;
             }
+            if ("world_movement".equals(type)) {
+                requestMovement(ctx, ObserverMovementRequest.from(message));
+                return;
+            }
             boolean ping = "ping".equals(type);
             boolean worldState = "world_state".equals(type) && playerAdmissions != null;
             boolean worldBootstrap = "world_bootstrap".equals(type) && playerAdmissions != null;
@@ -110,6 +118,58 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
                         Integer.parseInt(message.get("chunkX")), Integer.parseInt(message.get("chunkZ")),
                         Integer.parseInt(message.get("sectionY")));
         } catch (Exception ignored) { stop(ctx, "Invalid message"); }
+    }
+
+    private void requestMovement(ChannelHandlerContext ctx, ObserverMovementRequest request) {
+        long now = System.nanoTime();
+        if (playerAdmissions == null || playerAdmission == null || movementPending || worldBootstrapPending
+                || request.seq() <= sequence || request.sessionEpoch() != playSession.epoch()
+                || request.subscriptionId() != worldSubscriptionId || request.revision() != worldBootstrapRevision
+                || !request.dimension().equals(worldBootstrapDimension)
+                || (lastMovementNanos != 0 && now - lastMovementNanos < TimeUnit.MILLISECONDS.toNanos(80))) {
+            stop(ctx, "Movement unavailable");
+            return;
+        }
+        sequence = request.seq();
+        lastMovementNanos = now;
+        movementPending = true;
+        var expectedAuthentication = session;
+        var expectedSession = playSession;
+        var expectedAdmission = playerAdmission;
+        movementDeadline = ctx.executor().schedule(() -> stop(ctx, "Movement timed out"), 5, TimeUnit.SECONDS);
+        playerAdmissions.move(expectedAdmission, request.dimension(), request.intent(), now,
+                () -> accounts.valid(expectedAuthentication)
+                        && playSessions.valid(expectedAuthentication, expectedSession))
+                .whenComplete((result, failure) -> {
+                    try {
+                        ctx.executor().execute(() -> {
+                            movementPending = false;
+                            if (movementDeadline != null) movementDeadline.cancel(false);
+                            if (ended || !ctx.channel().isActive()) return;
+                            if (failure != null || result == null || session != expectedAuthentication
+                                    || playSession != expectedSession || playerAdmission != expectedAdmission
+                                    || !accounts.valid(expectedAuthentication)
+                                    || !playSessions.valid(expectedAuthentication, expectedSession)
+                                    || !playerAdmissions.valid(expectedSession, expectedAdmission)
+                                    || request.subscriptionId() != worldSubscriptionId
+                                    || request.revision() != worldBootstrapRevision
+                                    || !request.dimension().equals(result.state().dimension())) {
+                                stop(ctx, "Movement unavailable");
+                                return;
+                            }
+                            var state = result.state();
+                            send(ctx, "{\"type\":\"world_movement\",\"protocol\":1,\"seq\":" + request.seq()
+                                    + ",\"sessionEpoch\":" + expectedSession.epoch()
+                                    + ",\"subscriptionId\":" + request.subscriptionId()
+                                    + ",\"revision\":" + request.revision()
+                                    + ",\"serverTick\":" + result.serverTick() + ",\"applied\":" + result.applied()
+                                    + ",\"onGround\":" + result.onGround()
+                                    + ",\"dimension\":\"" + state.dimension() + "\",\"x\":" + state.x()
+                                    + ",\"y\":" + state.y() + ",\"z\":" + state.z()
+                                    + ",\"yaw\":" + state.yaw() + ",\"pitch\":" + state.pitch() + "}");
+                        });
+                    } catch (RejectedExecutionException ignored) { /* Release owns admission cleanup. */ }
+                });
     }
 
     private void requestWorldState(ChannelHandlerContext ctx, long requestSequence) {
@@ -144,7 +204,7 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
     }
 
     private void requestWorldBootstrap(ChannelHandlerContext ctx, long requestSequence) {
-        if (worldBootstrapPending || playerAdmission == null) { stop(ctx, "World bootstrap unavailable"); return; }
+        if (worldBootstrapPending || movementPending || playerAdmission == null) { stop(ctx, "World bootstrap unavailable"); return; }
         worldBootstrapPending = true;
         var expectedSession = playSession;
         var expectedAdmission = playerAdmission;
@@ -338,6 +398,8 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
     }
     private void release() {
         if (deadline != null) deadline.cancel(false);
+        if (movementDeadline != null) movementDeadline.cancel(false);
+        movementPending = false;
         worldStatePending = false;
         worldBootstrapPending = false;
         worldSectionPending = false;
@@ -348,7 +410,8 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
     @Override public void channelInactive(ChannelHandlerContext ctx) { ended = true; release(); ctx.fireChannelInactive(); }
     @Override public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) { ended = true; release(); ctx.close(); }
 
-    private static Map<String, String> parse(String text) throws Exception {
+    static Map<String, String> parse(String text) throws Exception {
+        if (text.length() > 1024) throw new IllegalArgumentException();
         try (var reader = new JsonReader(new StringReader(text))) {
             reader.setStrictness(Strictness.STRICT);
             var values = new HashMap<String, String>();
@@ -356,15 +419,20 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
             while (reader.hasNext()) {
                 String key = reader.nextName();
                 if (!Set.of("type", "username", "password", "seq", "offset", "subscriptionId", "revision",
-                        "chunkX", "chunkZ", "sectionY").contains(key) || values.containsKey(key) || values.size() >= 7) {
+                        "chunkX", "chunkZ", "sectionY", "protocol", "sessionEpoch", "dimension",
+                        "strafe", "forward", "yaw", "pitch", "jump").contains(key)
+                        || values.containsKey(key) || values.size() >= ObserverMovementRequest.KEYS.size()) {
                     throw new IllegalArgumentException();
                 }
-                if (Set.of("seq", "offset", "subscriptionId", "revision", "chunkX", "chunkZ", "sectionY").contains(key)) {
+                if (Set.of("seq", "offset", "subscriptionId", "revision", "chunkX", "chunkZ", "sectionY",
+                        "protocol", "sessionEpoch", "strafe", "forward", "yaw", "pitch", "jump").contains(key)) {
                     if (reader.peek() != JsonToken.NUMBER) throw new IllegalArgumentException();
                     String value = reader.nextString();
                     boolean valid = switch (key) {
                         case "chunkX", "chunkZ" -> value.matches("0|-?[1-9][0-9]{0,6}");
                         case "sectionY" -> value.matches("0|-?[1-9][0-9]{0,3}");
+                        case "sessionEpoch" -> value.matches("[1-9][0-9]{0,15}");
+                        case "strafe", "forward", "yaw", "pitch", "jump" -> value.matches("0|-?[1-9][0-9]{0,4}");
                         default -> value.matches("0|[1-9][0-9]{0,8}");
                     };
                     if (!valid) throw new IllegalArgumentException();

@@ -87,7 +87,7 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Verify browser account flow
+      - name: Verify browser account and first-person input flows
         working-directory: client_flutter/browser_tests
         run: |
           npm ci
@@ -102,6 +102,7 @@ jobs:
             client_flutter/build/web
             build/account-browser-evidence/*.png
             build/account-browser-evidence/result.json
+            build/account-browser-evidence/movement-input-result.json
 
       - name: Enforce Observer extraction invariants
         shell: bash
