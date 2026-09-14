@@ -166,8 +166,9 @@ try {
     Math.atan2(useOrigin.y+1.62-65.5,Math.hypot(dx,dz))*180/Math.PI);
   await waitFor(()=>outlines.some(o=>o.target?.x===10 && o.target?.y===65 && o.target?.z===10),
     'server lever outline');
-  await page.waitForFunction(()=>[...document.querySelectorAll('[aria-label]')]
-    .some(node=>node.getAttribute('aria-label')?.includes('3D 偵錯地形，伺服器選取輪廓')));
+  await page.waitForFunction(()=>[...document.querySelectorAll('flt-semantics')]
+    .some(node=>[node.getAttribute('aria-label'),node.textContent]
+      .some(label=>label?.includes('3D 偵錯地形，伺服器選取輪廓'))));
   const leverOutline=outlines.findLast(o=>o.target?.x===10 && o.target?.y===65 && o.target?.z===10);
   assert.ok(leverOutline.target.boxes.length>0 && leverOutline.target.boxes.length<=16);
   assert.ok(leverOutline.target.boxes.every(b=>b.length===6 && b[3]-b[0]<1),'Actual partial lever outline');
@@ -222,8 +223,8 @@ try {
     initial,wall,jumped,final,uses,leverOutline,sectionParts:sections,revisions:bootstraps.map(b=>b.revision)},null,2));
   console.log('Real browser / Minecraft movement and block-use smoke passed');
 } catch(error) {
-  const selectionLabels = await page?.evaluate(()=>[...document.querySelectorAll('[aria-label]')]
-    .map(n=>n.getAttribute('aria-label')).filter(v=>v?.includes('3D 偵錯地形')).slice(0,8).map(v=>v.slice(0,256))).catch(()=>[]);
+  const selectionLabels = await page?.evaluate(()=>[...document.querySelectorAll('flt-semantics')]
+    .flatMap(n=>[n.getAttribute('aria-label'),n.textContent]).filter(v=>v?.includes('3D 偵錯地形')).slice(0,8).map(v=>v.slice(0,256))).catch(()=>[]);
   console.error('Bounded debug selection labels:', JSON.stringify(selectionLabels));
   await page?.screenshot({path:resolve(evidence,'failure.png')}).catch(()=>{});
   throw error;
