@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'outbound_frame_pacer.dart';
 import 'world_target_outline.dart';
 import 'world_hotbar.dart';
+import 'world_destroy.dart';
 import 'persistent_registry_cache.dart';
 
 import 'package:flutter/foundation.dart';
@@ -142,6 +143,32 @@ class ObserverConnection extends ChangeNotifier {
     return value;
   }
 
+  Timer? _destroyDeadline, _destroyCooldown, _destroyPreparation;
+  final _destroyPreparationClock = Stopwatch();
+  int _destroyProtocol = 0,
+      _pendingDestroySequence = -1,
+      _destroyOperation = -1;
+  WorldDestroyAction? _pendingDestroyAction;
+  WorldDestroySnapshot? _destroy;
+  bool get destroyPending => _pendingDestroySequence >= 0;
+  bool get destroyActive => _destroyOperation >= 0;
+  bool get canDestroyBlock => canMove && _destroyProtocol == 1;
+  bool get destroyPreparing =>
+      (_destroyPreparation?.isActive ?? false) &&
+      _destroyPreparationClock.elapsedMilliseconds < 750;
+  WorldDestroySnapshot? get destroySnapshot {
+    final value = _destroy;
+    if (!canDestroyBlock ||
+        worldWindowRefreshing ||
+        value == null ||
+        value.sessionEpoch != sessionEpoch ||
+        value.subscriptionId != bootstrapSubscriptionId ||
+        value.revision != bootstrapRevision ||
+        value.dimension != bootstrapDimension)
+      return null;
+    return value;
+  }
+
   Timer? _hotbarDeadline, _hotbarCooldown;
   int _hotbarProtocol = 0, _pendingHotbarSequence = -1;
   int? _pendingHotbarSlot;
@@ -179,6 +206,9 @@ class ObserverConnection extends ChangeNotifier {
   bool get worldWindowRefreshing =>
       _worldWindowRefreshNeeded || _pendingWorldBootstrapSequence >= 0;
   bool get canSendWorldSectionNow =>
+      !destroyPreparing &&
+      !destroyActive &&
+      !destroyPending &&
       !blockUsePreparing &&
       !blockUsePending &&
       !outlinePending &&
@@ -454,6 +484,19 @@ class ObserverConnection extends ChangeNotifier {
             throw const FormatException();
           }
           _worldBlockUseProtocol = blockUseProtocol == 1 ? 1 : 0;
+          final destroyProtocol = message['worldBlockDestroyProtocol'];
+          if (destroyProtocol != null &&
+              (destroyProtocol is! int ||
+                  (destroyProtocol != 0 && destroyProtocol != 1))) {
+            throw const FormatException();
+          }
+          if (destroyProtocol == 1 &&
+              (playerAdmission != true ||
+                  identityProtocol != 1 ||
+                  worldMovementProtocol != 1 ||
+                  worldBootstrapProtocol != 1))
+            throw const FormatException();
+          _destroyProtocol = destroyProtocol == 1 ? 1 : 0;
           final hotbarProtocol = message['worldHotbarProtocol'];
           if (hotbarProtocol != null &&
               (hotbarProtocol is! int ||
@@ -557,6 +600,38 @@ class ObserverConnection extends ChangeNotifier {
           }
           if (_worldStateProtocol == 1 && playerAttached) _requestWorldState();
           ping();
+        case 'world_block_destroy':
+          if (!canDestroyBlock || !destroyPending || data.length > 1024)
+            throw const FormatException();
+          final snapshot = WorldDestroySnapshot.parse(message);
+          if (snapshot.seq != _pendingDestroySequence ||
+              snapshot.action != _pendingDestroyAction ||
+              snapshot.operation != _destroyOperation ||
+              snapshot.sessionEpoch != sessionEpoch ||
+              snapshot.subscriptionId != bootstrapSubscriptionId ||
+              snapshot.revision != bootstrapRevision ||
+              snapshot.dimension != bootstrapDimension)
+            throw const FormatException();
+          _destroyDeadline?.cancel();
+          _pendingDestroySequence = -1;
+          _pendingDestroyAction = null;
+          if (_destroy?.operation == snapshot.operation &&
+              _destroy!.worldMayHaveChanged &&
+              !snapshot.worldMayHaveChanged) {
+            throw const FormatException();
+          }
+          _destroy = snapshot;
+          if (snapshot.worldMayHaveChanged) _hotbar = null;
+          if (snapshot.refreshRequired) {
+            clearTargetOutline();
+            _worldGeometryRevision++;
+            _worldSections.clear();
+            _unavailableWorldSections.clear();
+            _wantedWorldSections = null;
+            _worldWindowRefreshNeeded = true;
+            _tryRefreshWorldWindow();
+          }
+          _notify();
         case 'world_hotbar':
           if (!canRequestHotbar || !hotbarPending || data.length > 4096)
             throw const FormatException();
@@ -1059,6 +1134,9 @@ class ObserverConnection extends ChangeNotifier {
   /// Immediate bounded read or slot intent; false never queues a later selection.
   bool requestHotbar({int? slot}) {
     if (!canRequestHotbar ||
+        destroyPending ||
+        destroyActive ||
+        destroyPreparing ||
         (slot != null && (slot < 0 || slot > 8)) ||
         hotbarPending ||
         outlinePending ||
@@ -1101,6 +1179,8 @@ class ObserverConnection extends ChangeNotifier {
   /// One immediate, read-only capture; callers own polling and rendering owns no requests.
   bool requestTargetOutline() {
     if (!canRequestTargetOutline ||
+        destroyPending ||
+        destroyPreparing ||
         outlinePending ||
         hotbarPending ||
         movementPending ||
@@ -1150,10 +1230,89 @@ class ObserverConnection extends ChangeNotifier {
     if (notify && changed) _notify();
   }
 
+  /// Sends only a mining intent. Input ownership supplies holds; no automatic renewal.
+  bool sendBlockDestroy(WorldDestroyAction action) {
+    if (!canDestroyBlock ||
+        destroyPending ||
+        outlinePending ||
+        hotbarPending ||
+        blockUsePending ||
+        blockUsePreparing ||
+        movementPending ||
+        worldWindowRefreshing ||
+        _pendingWorldSection != null ||
+        (action == WorldDestroyAction.start ? destroyActive : !destroyActive) ||
+        (action != WorldDestroyAction.cancel &&
+            (_destroyCooldown?.isActive ?? false)) ||
+        !(_pacer?.canSendImmediately ?? false))
+      return false;
+    try {
+      final seq = _sequence++;
+      if (action == WorldDestroyAction.start) {
+        _destroyOperation = seq;
+        _destroy = null;
+      }
+      clearTargetOutline();
+      cancelDestroyPreparation();
+      _pendingDestroySequence = seq;
+      _pendingDestroyAction = action;
+      _destroyCooldown?.cancel();
+      _destroyCooldown = Timer(const Duration(milliseconds: 100), _notify);
+      _destroyDeadline = Timer(
+        const Duration(seconds: 5),
+        () => _fail('挖掘回應逾時，連線已結束'),
+      );
+      _pacer!.send(
+        jsonEncode({
+          'type': 'world_block_destroy',
+          'protocol': 1,
+          'seq': seq,
+          'sessionEpoch': sessionEpoch,
+          'subscriptionId': bootstrapSubscriptionId,
+          'revision': bootstrapRevision,
+          'dimension': bootstrapDimension,
+          'operation': _destroyOperation,
+          'action': action.name,
+        }),
+      );
+      _notify();
+      return true;
+    } catch (_) {
+      _fail('連線已中斷');
+      return false;
+    }
+  }
+
+  /// Short bounded pause of new section work while the input owner flushes its look correction.
+  bool prepareBlockDestroy() {
+    if (!canDestroyBlock ||
+        destroyPending ||
+        destroyActive ||
+        destroyPreparing ||
+        blockUsePreparing ||
+        blockUsePending ||
+        worldWindowRefreshing)
+      return false;
+    _destroyPreparationClock
+      ..reset()
+      ..start();
+    _destroyPreparation = Timer(const Duration(milliseconds: 750), _notify);
+    return true;
+  }
+
+  void cancelDestroyPreparation() {
+    _destroyPreparation?.cancel();
+    _destroyPreparation = null;
+    _destroyPreparationClock.stop();
+  }
+
   /// Sends an immediate use intent only after previous world work has drained.
   /// Callers own input/focus; false means no action was queued or sent.
   bool sendBlockUse() {
     if (!canUseBlock ||
+        destroyPending ||
+        destroyActive ||
+        destroyPreparing ||
         outlinePending ||
         hotbarPending ||
         blockUsePending ||
@@ -1196,6 +1355,9 @@ class ObserverConnection extends ChangeNotifier {
   /// prior work. This lease expires even if the input owner stops sampling.
   bool prepareBlockUse() {
     if (!canUseBlock ||
+        destroyPending ||
+        destroyActive ||
+        destroyPreparing ||
         blockUsePending ||
         blockUsePreparing ||
         worldWindowRefreshing)
@@ -1223,6 +1385,7 @@ class ObserverConnection extends ChangeNotifier {
     required bool jump,
   }) {
     if (!canMove ||
+        destroyPending ||
         outlinePending ||
         hotbarPending ||
         blockUsePending ||
@@ -1299,6 +1462,7 @@ class ObserverConnection extends ChangeNotifier {
         _worldBootstrapProtocol != 1 ||
         !playerAttached ||
         _pendingWorldBootstrapSequence >= 0 ||
+        destroyPending ||
         outlinePending ||
         hotbarPending ||
         blockUsePending ||
@@ -1310,6 +1474,9 @@ class ObserverConnection extends ChangeNotifier {
       final seq = _sequence++;
       clearTargetOutline();
       _hotbar = null;
+      _destroyOperation = -1;
+      _destroy = null;
+      cancelDestroyPreparation();
       _pendingWorldBootstrapSequence = seq;
       _bootstrapDeadline = Timer(
         const Duration(seconds: 5),
@@ -1535,6 +1702,14 @@ class ObserverConnection extends ChangeNotifier {
     _generation++;
     _worldGeometryRevision++;
     _movementDeadline?.cancel();
+    _destroyDeadline?.cancel();
+    _destroyCooldown?.cancel();
+    cancelDestroyPreparation();
+    _destroyProtocol = 0;
+    _pendingDestroySequence = -1;
+    _destroyOperation = -1;
+    _pendingDestroyAction = null;
+    _destroy = null;
     _hotbarDeadline?.cancel();
     _hotbarCooldown?.cancel();
     _hotbarProtocol = 0;
