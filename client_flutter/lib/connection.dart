@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'outbound_frame_pacer.dart';
 import 'world_target_outline.dart';
+import 'world_hotbar.dart';
 
 import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
@@ -135,6 +136,25 @@ class ObserverConnection extends ChangeNotifier {
     return value;
   }
 
+  Timer? _hotbarDeadline, _hotbarCooldown;
+  int _hotbarProtocol = 0, _pendingHotbarSequence = -1;
+  int? _pendingHotbarSlot;
+  WorldHotbarSnapshot? _hotbar;
+  bool get hotbarPending => _pendingHotbarSequence >= 0;
+  bool get canRequestHotbar => canMove && _hotbarProtocol == 1;
+  WorldHotbarSnapshot? get hotbarSnapshot {
+    final value = _hotbar;
+    if (!canRequestHotbar ||
+        worldWindowRefreshing ||
+        value == null ||
+        value.sessionEpoch != sessionEpoch ||
+        value.subscriptionId != bootstrapSubscriptionId ||
+        value.revision != bootstrapRevision ||
+        value.dimension != bootstrapDimension)
+      return null;
+    return value;
+  }
+
   Timer? _blockUseDeadline, _blockUseCooldown;
   Timer? _blockUsePreparation;
   final _blockUsePreparationClock = Stopwatch();
@@ -156,6 +176,7 @@ class ObserverConnection extends ChangeNotifier {
       !blockUsePreparing &&
       !blockUsePending &&
       !outlinePending &&
+      !hotbarPending &&
       !(_sectionCooldown?.isActive ?? false) &&
       !worldWindowRefreshing &&
       _pendingWorldSection == null;
@@ -426,6 +447,18 @@ class ObserverConnection extends ChangeNotifier {
             throw const FormatException();
           }
           _worldBlockUseProtocol = blockUseProtocol == 1 ? 1 : 0;
+          final hotbarProtocol = message['worldHotbarProtocol'];
+          if (hotbarProtocol != null &&
+              (hotbarProtocol is! int ||
+                  (hotbarProtocol != 0 && hotbarProtocol != 1)))
+            throw const FormatException();
+          if (hotbarProtocol == 1 &&
+              (playerAdmission != true ||
+                  identityProtocol != 1 ||
+                  worldMovementProtocol != 1 ||
+                  worldBootstrapProtocol != 1))
+            throw const FormatException();
+          _hotbarProtocol = hotbarProtocol == 1 ? 1 : 0;
           final outlineProtocol = message['worldTargetOutlineProtocol'];
           if (outlineProtocol != null &&
               (outlineProtocol is! int ||
@@ -517,6 +550,25 @@ class ObserverConnection extends ChangeNotifier {
           }
           if (_worldStateProtocol == 1 && playerAttached) _requestWorldState();
           ping();
+        case 'world_hotbar':
+          if (!canRequestHotbar || !hotbarPending || data.length > 4096)
+            throw const FormatException();
+          final snapshot = WorldHotbarSnapshot.parse(message);
+          if (snapshot.seq != _pendingHotbarSequence ||
+              snapshot.sessionEpoch != sessionEpoch ||
+              snapshot.subscriptionId != bootstrapSubscriptionId ||
+              snapshot.revision != bootstrapRevision ||
+              snapshot.dimension != bootstrapDimension ||
+              (snapshot.outcome != 'denied' &&
+                  snapshot.outcome !=
+                      (_pendingHotbarSlot == null ? 'snapshot' : 'selected')))
+            throw const FormatException();
+          _hotbarDeadline?.cancel();
+          _pendingHotbarSequence = -1;
+          _pendingHotbarSlot = null;
+          _hotbar = snapshot;
+          _tryRefreshWorldWindow();
+          _notify();
         case 'world_target_outline':
           if (!canRequestTargetOutline || !outlinePending)
             throw const FormatException();
@@ -596,6 +648,7 @@ class ObserverConnection extends ChangeNotifier {
               message['refreshRequired'] != (outcome == 'applied')) {
             throw const FormatException();
           }
+          _hotbar = null;
           _blockUseDeadline?.cancel();
           _pendingBlockUseSequence = -1;
           lastBlockUseOutcome = outcome as String;
@@ -985,10 +1038,53 @@ class ObserverConnection extends ChangeNotifier {
     }
   }
 
+  /// Immediate bounded read or slot intent; false never queues a later selection.
+  bool requestHotbar({int? slot}) {
+    if (!canRequestHotbar ||
+        (slot != null && (slot < 0 || slot > 8)) ||
+        hotbarPending ||
+        outlinePending ||
+        movementPending ||
+        blockUsePending ||
+        blockUsePreparing ||
+        worldWindowRefreshing ||
+        (_hotbarCooldown?.isActive ?? false) ||
+        !(_pacer?.canSendImmediately ?? false))
+      return false;
+    try {
+      final seq = _sequence++;
+      _pendingHotbarSequence = seq;
+      _pendingHotbarSlot = slot;
+      _hotbarCooldown = Timer(const Duration(milliseconds: 250), _notify);
+      _hotbarDeadline = Timer(
+        const Duration(seconds: 5),
+        () => _fail('快捷列回應逾時，連線已結束'),
+      );
+      _pacer!.send(
+        jsonEncode({
+          'type': 'world_hotbar',
+          'protocol': 1,
+          'seq': seq,
+          'sessionEpoch': sessionEpoch,
+          'subscriptionId': bootstrapSubscriptionId,
+          'revision': bootstrapRevision,
+          'dimension': bootstrapDimension,
+          if (slot != null) 'slot': slot,
+        }),
+      );
+      _notify();
+      return true;
+    } catch (_) {
+      _fail('連線已中斷');
+      return false;
+    }
+  }
+
   /// One immediate, read-only capture; callers own polling and rendering owns no requests.
   bool requestTargetOutline() {
     if (!canRequestTargetOutline ||
         outlinePending ||
+        hotbarPending ||
         movementPending ||
         blockUsePending ||
         blockUsePreparing ||
@@ -1041,6 +1137,7 @@ class ObserverConnection extends ChangeNotifier {
   bool sendBlockUse() {
     if (!canUseBlock ||
         outlinePending ||
+        hotbarPending ||
         blockUsePending ||
         movementPending ||
         worldWindowRefreshing ||
@@ -1109,6 +1206,7 @@ class ObserverConnection extends ChangeNotifier {
   }) {
     if (!canMove ||
         outlinePending ||
+        hotbarPending ||
         blockUsePending ||
         _worldWindowRefreshNeeded ||
         !(_pacer?.canSendImmediately ?? false) ||
@@ -1184,6 +1282,7 @@ class ObserverConnection extends ChangeNotifier {
         !playerAttached ||
         _pendingWorldBootstrapSequence >= 0 ||
         outlinePending ||
+        hotbarPending ||
         blockUsePending ||
         movementPending ||
         _pendingWorldSection != null) {
@@ -1192,6 +1291,7 @@ class ObserverConnection extends ChangeNotifier {
     try {
       final seq = _sequence++;
       clearTargetOutline();
+      _hotbar = null;
       _pendingWorldBootstrapSequence = seq;
       _bootstrapDeadline = Timer(
         const Duration(seconds: 5),
@@ -1374,6 +1474,12 @@ class ObserverConnection extends ChangeNotifier {
     _generation++;
     _worldGeometryRevision++;
     _movementDeadline?.cancel();
+    _hotbarDeadline?.cancel();
+    _hotbarCooldown?.cancel();
+    _hotbarProtocol = 0;
+    _pendingHotbarSequence = -1;
+    _pendingHotbarSlot = null;
+    _hotbar = null;
     clearTargetOutline();
     _outlineDeadline?.cancel();
     _outlineCooldown?.cancel();
