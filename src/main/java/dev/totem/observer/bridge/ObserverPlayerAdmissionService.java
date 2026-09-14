@@ -151,6 +151,8 @@ public final class ObserverPlayerAdmissionService implements AutoCloseable {
     private volatile boolean closed;
     /** One entry per actively controlled admission; all access is server-thread only. */
     private final Map<Admission, Motion> motions = new HashMap<>();
+    /** Includes at most one unconsumed terminal result per admission. */
+    private final Map<Admission, ObserverDestroyOperation> destruction = new HashMap<>();
 
     public ObserverPlayerAdmissionService(MinecraftServer server) {
         this(server, System::nanoTime);
@@ -243,6 +245,7 @@ public final class ObserverPlayerAdmissionService implements AutoCloseable {
                     motion.input = ObserverMovementIntent.idle(admission.player().getYRot(), admission.player().getXRot());
                     motion.inputTime = receivedNanos;
                 }
+                cancelDestruction(admission);
                 result.complete(ObserverBlockUse.use(admission.player(), authorized));
             } catch (Throwable failure) {
                 result.completeExceptionally(failure);
@@ -285,6 +288,54 @@ public final class ObserverPlayerAdmissionService implements AutoCloseable {
 
     record HotbarResult(ObserverHotbar.Snapshot state) {}
 
+    CompletableFuture<ObserverDestroyOperation.Snapshot> destroy(
+            Admission admission, String dimension, long operation, ObserverDestroyOperation.Action action,
+            long receivedNanos, BooleanSupplier sessionAuthorized) {
+        var result = new CompletableFuture<ObserverDestroyOperation.Snapshot>();
+        execute(() -> {
+            try {
+                long age = nanoTime.getAsLong() - receivedNanos;
+                BooleanSupplier authorized = () -> admission != null && valid(admission.playSession(), admission)
+                        && sessionAuthorized.getAsBoolean()
+                        && dimension.equals(admission.player().level().dimension().identifier().toString());
+                if (age < 0 || age > TimeUnit.MILLISECONDS.toNanos(250) || !authorized.getAsBoolean()) {
+                    cancelDestruction(admission);
+                    result.complete(null);
+                    return;
+                }
+                var owner = destruction.get(admission);
+                if (action == ObserverDestroyOperation.Action.START) {
+                    // Bootstrap is the explicit synchronization/consumption boundary, never overwrite a terminal.
+                    if (owner != null) { result.complete(null); return; }
+                    owner = new ObserverDestroyOperation(admission.player(), operation, receivedNanos, authorized, nanoTime);
+                    destruction.put(admission, owner);
+                    result.complete(owner.start());
+                } else if (owner == null) {
+                    result.complete(null);
+                } else if (action == ObserverDestroyOperation.Action.HOLD) {
+                    result.complete(owner.hold(operation, receivedNanos));
+                } else if (action == ObserverDestroyOperation.Action.CANCEL) {
+                    result.complete(owner.cancel(operation));
+                } else {
+                    throw new IllegalArgumentException("Unknown mining action");
+                }
+            } catch (Throwable failure) {
+                // START can mutate before throwing. The admission must not survive a failed mining action.
+                var current = admission == null ? null : active.get(admission.playSession().account());
+                try {
+                    if (current != null && current.admission().equals(admission)) removeNow(current);
+                } catch (Throwable cleanupFailure) { failure.addSuppressed(cleanupFailure); }
+                result.completeExceptionally(failure);
+            }
+        });
+        return result;
+    }
+
+    private void cancelDestruction(Admission admission) {
+        var owner = destruction.get(admission);
+        if (owner != null) owner.cancelCurrent();
+    }
+
     CompletableFuture<HotbarResult> hotbar(Admission admission, String dimension, Integer slot, long receivedNanos,
                                            BooleanSupplier sessionAuthorized) {
         var result = new CompletableFuture<HotbarResult>();
@@ -295,6 +346,7 @@ public final class ObserverPlayerAdmissionService implements AutoCloseable {
                         && sessionAuthorized.getAsBoolean()
                         && dimension.equals(admission.player().level().dimension().identifier().toString());
                 if (!authorized.getAsBoolean()) { result.complete(null); return; }
+                if (slot != null) cancelDestruction(admission);
                 var state = slot == null ? ObserverHotbar.snapshot(admission.player(), authorized)
                         : ObserverHotbar.select(admission.player(), slot, authorized);
                 result.complete(authorized.getAsBoolean() ? new HotbarResult(state) : null);
@@ -364,6 +416,11 @@ public final class ObserverPlayerAdmissionService implements AutoCloseable {
                 if (!valid(admission.playSession(), admission)) {
                     result.complete(null);
                     return;
+                }
+                var mining = destruction.get(admission);
+                if (mining != null) {
+                    mining.close();
+                    destruction.remove(admission);
                 }
                 var player = admission.player();
                 var level = player.level();
@@ -556,8 +613,17 @@ public final class ObserverPlayerAdmissionService implements AutoCloseable {
         var motion = motions.remove(value.admission());
         if (motion != null) motion.cancel();
         var player = value.admission().player();
-        if (server.getPlayerList().getPlayer(player.getUUID()) == player) server.getPlayerList().remove(player);
-        value.connection().closeEmbeddedChannel();
+        var mining = destruction.remove(value.admission());
+        try {
+            if (mining != null) mining.close();
+        } finally {
+            try {
+                if (server.getPlayerList().getPlayer(player.getUUID()) == player) server.getPlayerList().remove(player);
+            } finally {
+                if (mining != null) mining.removed();
+                value.connection().closeEmbeddedChannel();
+            }
+        }
     }
 
     private void execute(Runnable task) {

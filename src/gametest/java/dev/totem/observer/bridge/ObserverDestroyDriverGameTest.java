@@ -141,7 +141,7 @@ public final class ObserverDestroyDriverGameTest {
         }
     }
 
-    private static final class Fixture implements AutoCloseable {
+    static final class Fixture implements AutoCloseable {
         final ServerPlayer player;
         final EmbeddedChannel channel;
         final BlockPos pos;
