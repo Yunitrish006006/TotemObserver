@@ -63,7 +63,7 @@ try {
   browser=await chromium.launch({headless:true,args:['--no-sandbox'],
     executablePath:process.env.CHROME_BIN || (existsSync('/usr/bin/chromium')?'/usr/bin/chromium':undefined)});
   page=await browser.newPage({viewport:{width:1100,height:1100}});
-  const errors=[], corrections=[], bootstraps=[], requests=[], uses=[], useRequests=[];
+  const errors=[], corrections=[], bootstraps=[], requests=[], uses=[], useRequests=[], outlines=[];
   let sections=0; const floorParts=new Map();
   page.on('pageerror',()=>errors.push('runtime error'));
   // Passive observation only: no routing, mocked response, or injected input protocol.
@@ -71,6 +71,7 @@ try {
     socket.on('framereceived',event=>{
       const message=JSON.parse(event.payload.toString());
       if(message.type==='world_movement') corrections.push(message);
+      if(message.type==='world_target_outline') { outlines.push(message); assert.ok(outlines.length<100,'Bounded outline observations'); }
       if(message.type==='world_bootstrap') bootstraps.push(message);
       if(message.type==='world_block_use') {
         uses.push(message);
@@ -163,6 +164,15 @@ try {
   const dx=10.5-useOrigin.x, dz=10.75-useOrigin.z;
   await aim(-Math.atan2(dx,dz)*180/Math.PI,
     Math.atan2(useOrigin.y+1.62-65.5,Math.hypot(dx,dz))*180/Math.PI);
+  await waitFor(()=>outlines.some(o=>o.target?.x===10 && o.target?.y===65 && o.target?.z===10),
+    'server lever outline');
+  await page.waitForFunction(()=>[...document.querySelectorAll('flt-semantics')]
+    .some(node=>[node.getAttribute('aria-label'),node.textContent]
+      .some(label=>label?.includes('3D 偵錯地形，伺服器選取輪廓'))));
+  const leverOutline=outlines.findLast(o=>o.target?.x===10 && o.target?.y===65 && o.target?.z===10);
+  assert.ok(leverOutline.target.boxes.length>0 && leverOutline.target.boxes.length<=16);
+  assert.ok(leverOutline.target.boxes.every(b=>b.length===6 && b[3]-b[0]<1),'Actual partial lever outline');
+  await page.screenshot({path:resolve(evidence,'server-lever-outline.png')});
   const beforeUseRevision=bootstraps.at(-1).revision;
   await page.keyboard.press('e');
   await waitFor(()=>uses.length===1,'browser use acknowledgment');
@@ -209,10 +219,13 @@ try {
   await writeFile(resolve(evidence,'result.json'),JSON.stringify({passed:true,fixture:ready.fixture,
     checks:['real-admission','terrain-snapshots','visible-target-selection','pointer-lock','WASD','wall-collision','jump-land',
       'mouse-look','authoritative-correction','cross-chunk-window','logout-release',
-      'empty-hand-fixture','browser-E-use','real-lever-powered','post-use-revision-refresh'],
-    initial,wall,jumped,final,uses,sectionParts:sections,revisions:bootstraps.map(b=>b.revision)},null,2));
+      'server-partial-lever-outline','empty-hand-fixture','browser-E-use','real-lever-powered','post-use-revision-refresh'],
+    initial,wall,jumped,final,uses,leverOutline,sectionParts:sections,revisions:bootstraps.map(b=>b.revision)},null,2));
   console.log('Real browser / Minecraft movement and block-use smoke passed');
 } catch(error) {
+  const selectionLabels = await page?.evaluate(()=>[...document.querySelectorAll('flt-semantics')]
+    .flatMap(n=>[n.getAttribute('aria-label'),n.textContent]).filter(v=>v?.includes('3D 偵錯地形')).slice(0,8).map(v=>v.slice(0,256))).catch(()=>[]);
+  console.error('Bounded debug selection labels:', JSON.stringify(selectionLabels));
   await page?.screenshot({path:resolve(evidence,'failure.png')}).catch(()=>{});
   throw error;
 } finally {
