@@ -25,6 +25,10 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
     private ObserverPlayerAdmissionService.Admission playerAdmission;
     private boolean selected, pending, ended, worldStatePending, worldBootstrapPending, worldSectionPending;
     private long sequence = -1;
+    private boolean destroyPending;
+    private long destroyOperation = -1, lastDestroyNanos;
+    private java.util.concurrent.atomic.AtomicBoolean destroyBinding;
+    private io.netty.util.concurrent.ScheduledFuture<?> destroyDeadline;
     private boolean hotbarPending;
     private long lastHotbarNanos;
     private io.netty.util.concurrent.ScheduledFuture<?> hotbarDeadline;
@@ -64,6 +68,7 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
                     + ",\"worldBlockUseProtocol\":" + (playerAdmissions == null ? 0 : ObserverBlockUseRequest.PROTOCOL)
                     + ",\"worldTargetOutlineProtocol\":" + (playerAdmissions == null ? 0 : ObserverTargetOutlineRequest.PROTOCOL)
                     + ",\"worldHotbarProtocol\":" + (playerAdmissions == null ? 0 : ObserverHotbarRequest.PROTOCOL)
+                    + ",\"worldBlockDestroyProtocol\":" + (playerAdmissions == null ? 0 : ObserverDestroyRequest.PROTOCOL)
                     + ",\"play\":false}");
             deadline = ctx.executor().schedule(() -> stop(ctx, "Login timed out"), 10, TimeUnit.SECONDS);
         } else if (selected && event instanceof IdleStateEvent) stop(ctx, "Connection idle");
@@ -115,6 +120,9 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
             if ("world_hotbar".equals(type)) {
                 requestHotbar(ctx, ObserverHotbarRequest.from(message)); return;
             }
+            if ("world_block_destroy".equals(type)) {
+                requestDestroy(ctx, ObserverDestroyRequest.from(message)); return;
+            }
             boolean ping = "ping".equals(type);
             boolean worldState = "world_state".equals(type) && playerAdmissions != null;
             boolean worldBootstrap = "world_bootstrap".equals(type) && playerAdmissions != null;
@@ -146,7 +154,7 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
     private void requestMovement(ChannelHandlerContext ctx, ObserverMovementRequest request) {
         long now = System.nanoTime();
         if (playerAdmissions == null || playerAdmission == null || movementPending || worldBootstrapPending
-                || blockUsePending || hotbarPending || outlinePending || worldRefreshRequired
+                || blockUsePending || hotbarPending || outlinePending || destroyPending || worldRefreshRequired
                 || request.seq() <= sequence || request.sessionEpoch() != playSession.epoch()
                 || request.subscriptionId() != worldSubscriptionId || request.revision() != worldBootstrapRevision
                 || !request.dimension().equals(worldBootstrapDimension)
@@ -196,10 +204,64 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
                 });
     }
 
+    private void requestDestroy(ChannelHandlerContext ctx, ObserverDestroyRequest request) {
+        long now = System.nanoTime();
+        boolean start = request.action() == ObserverDestroyOperation.Action.START;
+        if (playerAdmissions == null || playerAdmission == null || destroyPending || movementPending
+                || blockUsePending || hotbarPending || outlinePending || worldBootstrapPending || worldSectionPending
+                || worldRefreshRequired || request.seq() <= sequence || request.sessionEpoch() != playSession.epoch()
+                || request.subscriptionId() != worldSubscriptionId || request.revision() != worldBootstrapRevision
+                || !request.dimension().equals(worldBootstrapDimension)
+                || (start ? destroyOperation >= 0 : destroyOperation != request.operation())
+                || (request.action() != ObserverDestroyOperation.Action.CANCEL && lastDestroyNanos != 0
+                    && now - lastDestroyNanos < TimeUnit.MILLISECONDS.toNanos(80))) {
+            stop(ctx, "Mining unavailable"); return;
+        }
+        sequence = request.seq(); lastDestroyNanos = now; destroyPending = true;
+        if (start) {
+            destroyOperation = request.operation();
+            destroyBinding = new java.util.concurrent.atomic.AtomicBoolean(true);
+        }
+        var binding = destroyBinding;
+        var expectedAuthentication = session;
+        var expectedSession = playSession;
+        var expectedAdmission = playerAdmission;
+        destroyDeadline = ctx.executor().schedule(() -> stop(ctx, "Mining timed out"), 5, TimeUnit.SECONDS);
+        playerAdmissions.destroy(expectedAdmission, request.dimension(), request.operation(), request.action(), now,
+                () -> binding != null && binding.get() && accounts.valid(expectedAuthentication)
+                        && playSessions.valid(expectedAuthentication, expectedSession))
+                .whenComplete((result, failure) -> {
+                    try {
+                        ctx.executor().execute(() -> {
+                            destroyPending = false;
+                            if (destroyDeadline != null) destroyDeadline.cancel(false);
+                            if (ended || !ctx.channel().isActive()) return;
+                            if (failure != null || result == null || session != expectedAuthentication
+                                    || playSession != expectedSession || playerAdmission != expectedAdmission
+                                    || !accounts.valid(expectedAuthentication)
+                                    || !playSessions.valid(expectedAuthentication, expectedSession)
+                                    || !playerAdmissions.valid(expectedSession, expectedAdmission)
+                                    || binding != destroyBinding || binding == null || !binding.get()
+                                    || request.subscriptionId() != worldSubscriptionId
+                                    || request.revision() != worldBootstrapRevision
+                                    || !request.dimension().equals(worldBootstrapDimension)) {
+                                stop(ctx, "Mining unavailable"); return;
+                            }
+                            try {
+                                String encoded = ObserverDestroyResponse.encode(request, result);
+                                worldRefreshRequired = result.result().outcome() != ObserverDestroyDriver.Outcome.ACTIVE;
+                                if (worldRefreshRequired) binding.set(false);
+                                send(ctx, encoded);
+                            } catch (RuntimeException invalid) { stop(ctx, "Invalid mining result"); }
+                        });
+                    } catch (RejectedExecutionException ignored) { /* Release invalidates the binding and admission. */ }
+                });
+    }
+
     private void requestBlockUse(ChannelHandlerContext ctx, ObserverBlockUseRequest request) {
         long now = System.nanoTime();
         if (playerAdmissions == null || playerAdmission == null || blockUsePending || hotbarPending || outlinePending || movementPending
-                || worldBootstrapPending || worldSectionPending || worldRefreshRequired
+                || worldBootstrapPending || worldSectionPending || destroyPending || destroyOperation >= 0 || worldRefreshRequired
                 || request.seq() <= sequence || request.sessionEpoch() != playSession.epoch()
                 || request.subscriptionId() != worldSubscriptionId || request.revision() != worldBootstrapRevision
                 || !request.dimension().equals(worldBootstrapDimension)
@@ -248,7 +310,7 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
 
     private void requestTargetOutline(ChannelHandlerContext ctx, ObserverTargetOutlineRequest request) {
         long now = System.nanoTime();
-        if (playerAdmissions == null || playerAdmission == null || outlinePending || hotbarPending || movementPending || blockUsePending
+        if (playerAdmissions == null || playerAdmission == null || outlinePending || hotbarPending || movementPending || blockUsePending || destroyPending
                 || worldBootstrapPending || worldRefreshRequired || request.seq() <= sequence
                 || request.sessionEpoch() != playSession.epoch() || request.subscriptionId() != worldSubscriptionId
                 || request.revision() != worldBootstrapRevision || !request.dimension().equals(worldBootstrapDimension)
@@ -287,7 +349,7 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
 
     private void requestHotbar(ChannelHandlerContext ctx, ObserverHotbarRequest request) {
         long now = System.nanoTime();
-        if (playerAdmissions == null || playerAdmission == null || hotbarPending || outlinePending || movementPending || blockUsePending
+        if (playerAdmissions == null || playerAdmission == null || hotbarPending || outlinePending || movementPending || blockUsePending || destroyPending || destroyOperation >= 0
                 || worldBootstrapPending || worldRefreshRequired || request.seq() <= sequence
                 || request.sessionEpoch() != playSession.epoch() || request.subscriptionId() != worldSubscriptionId
                 || request.revision() != worldBootstrapRevision || !request.dimension().equals(worldBootstrapDimension)
@@ -354,7 +416,8 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
     }
 
     private void requestWorldBootstrap(ChannelHandlerContext ctx, long requestSequence) {
-        if (worldBootstrapPending || movementPending || blockUsePending || hotbarPending || outlinePending || playerAdmission == null) { stop(ctx, "World bootstrap unavailable"); return; }
+        if (worldBootstrapPending || movementPending || blockUsePending || hotbarPending || outlinePending || destroyPending || playerAdmission == null) { stop(ctx, "World bootstrap unavailable"); return; }
+        if (destroyBinding != null) destroyBinding.set(false);
         worldBootstrapPending = true;
         var expectedSession = playSession;
         var expectedAdmission = playerAdmission;
@@ -390,6 +453,8 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
         worldBootstrapCenterChunkX = snapshot.centerChunkX();
         worldBootstrapCenterChunkZ = snapshot.centerChunkZ();
         worldRefreshRequired = false;
+        destroyOperation = -1;
+        destroyBinding = null;
         send(ctx, "{\"type\":\"world_bootstrap\",\"protocol\":" + WORLD_BOOTSTRAP_PROTOCOL
                 + ",\"seq\":" + requestSequence + ",\"sessionEpoch\":" + expectedSession.epoch()
                 + ",\"subscriptionId\":" + worldSubscriptionId + ",\"revision\":" + worldBootstrapRevision
@@ -413,7 +478,7 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
                                      int chunkX, int chunkZ, int sectionY) {
         int minSectionY = Math.floorDiv(worldBootstrapMinY, 16);
         int maxSectionY = Math.floorDiv(worldBootstrapMinY + worldBootstrapHeight - 1, 16);
-        if (worldSectionPending || blockUsePending || hotbarPending || outlinePending || worldRefreshRequired || playerAdmission == null || worldBootstrapDimension == null
+        if (worldSectionPending || blockUsePending || hotbarPending || outlinePending || destroyPending || destroyOperation >= 0 || worldRefreshRequired || playerAdmission == null || worldBootstrapDimension == null
                 || subscriptionId != worldSubscriptionId || revision != worldBootstrapRevision
                 || Math.abs((long) chunkX - worldBootstrapCenterChunkX) > WORLD_BOOTSTRAP_RADIUS
                 || Math.abs((long) chunkZ - worldBootstrapCenterChunkZ) > WORLD_BOOTSTRAP_RADIUS
@@ -548,6 +613,9 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
         ctx.writeAndFlush(new CloseWebSocketFrame(1008, reason)).addListener(ChannelFutureListener.CLOSE);
     }
     private void release() {
+        if (destroyBinding != null) destroyBinding.set(false);
+        if (destroyDeadline != null) destroyDeadline.cancel(false);
+        destroyPending = false;
         if (deadline != null) deadline.cancel(false);
         if (movementDeadline != null) movementDeadline.cancel(false);
         if (blockUseDeadline != null) blockUseDeadline.cancel(false);
@@ -576,12 +644,12 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
                 String key = reader.nextName();
                 if (!Set.of("type", "username", "password", "seq", "offset", "subscriptionId", "revision",
                         "chunkX", "chunkZ", "sectionY", "protocol", "sessionEpoch", "dimension",
-                        "strafe", "forward", "yaw", "pitch", "jump", "registryFingerprint", "slot").contains(key)
+                        "strafe", "forward", "yaw", "pitch", "jump", "registryFingerprint", "slot", "operation", "action").contains(key)
                         || values.containsKey(key) || values.size() >= ObserverMovementRequest.KEYS.size()) {
                     throw new IllegalArgumentException();
                 }
                 if (Set.of("seq", "offset", "subscriptionId", "revision", "chunkX", "chunkZ", "sectionY",
-                        "protocol", "sessionEpoch", "strafe", "forward", "yaw", "pitch", "jump", "slot").contains(key)) {
+                        "protocol", "sessionEpoch", "strafe", "forward", "yaw", "pitch", "jump", "slot", "operation").contains(key)) {
                     if (reader.peek() != JsonToken.NUMBER) throw new IllegalArgumentException();
                     String value = reader.nextString();
                     boolean valid = switch (key) {
