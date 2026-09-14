@@ -65,7 +65,7 @@ try {
     executablePath:process.env.CHROME_BIN || (existsSync('/usr/bin/chromium')?'/usr/bin/chromium':undefined)};
   browser=await chromium.launchPersistentContext(profile,browserOptions);
   page=await browser.newPage();
-  const errors=[], corrections=[], bootstraps=[], requests=[], uses=[], useRequests=[], outlines=[];
+  const errors=[], corrections=[], bootstraps=[], requests=[], uses=[], useRequests=[], outlines=[], hotbars=[];
   let sections=0; const floorParts=new Map();
   page.on('pageerror',()=>errors.push('runtime error'));
   // Passive observation only: no routing, mocked response, or injected input protocol.
@@ -73,6 +73,7 @@ try {
     socket.on('framereceived',event=>{
       const message=JSON.parse(event.payload.toString());
       if(message.type==='world_movement') corrections.push(message);
+      if(message.type==='world_hotbar') {hotbars.push(message);assert.ok(hotbars.length<100,'Bounded hotbar observations');}
       if(message.type==='world_target_outline') { outlines.push(message); assert.ok(outlines.length<100,'Bounded outline observations'); }
       if(message.type==='world_bootstrap') bootstraps.push(message);
       if(message.type==='world_block_use') {
@@ -160,8 +161,19 @@ try {
     }
     throw new Error('Could not settle authoritative use aim');
   }
+  await waitFor(()=>hotbars.some(h=>h.outcome==='snapshot'),'initial authoritative hotbar');
+  const firstHotbar=hotbars.find(h=>h.outcome==='snapshot');
+  assert.equal(firstHotbar.selected,0); assert.equal(firstHotbar.slots[0].item,'minecraft:stick');
+  assert.equal(firstHotbar.slots[0].count,7);
+  await page.keyboard.press('2');
+  await waitFor(()=>hotbars.some(h=>h.outcome==='selected' && h.selected===1),'number key server confirmation');
+  await waitFor(async()=>{const s=await state();return s.selectedSlot===1 && s.mainHandEmpty && s.slotZeroCount===7;},
+    'real selected empty hand and conserved inventory');
+  await page.waitForFunction(()=>document.body.textContent.includes('快捷列 2/9 · 空手') ||
+    [...document.querySelectorAll('[aria-label]')].some(n=>n.getAttribute('aria-label')?.includes('快捷列 2/9 · 空手')));
+  await page.screenshot({path:resolve(evidence,'hotbar-confirmed.png')});
   const useOrigin=await state();
-  assert.ok(useOrigin.mainHandEmpty && useOrigin.offHandEmpty,'Explicit empty-hand fixture');
+  assert.ok(useOrigin.mainHandEmpty && useOrigin.offHandEmpty,'Server-confirmed empty slot');
   assert.equal(useOrigin.leverPowered,false);
   const dx=10.5-useOrigin.x, dz=10.75-useOrigin.z;
   await aim(-Math.atan2(dx,dz)*180/Math.PI,
@@ -282,8 +294,8 @@ try {
   await writeFile(resolve(evidence,'result.json'),JSON.stringify({passed:true,fixture:ready.fixture,
     checks:['real-admission','terrain-snapshots','visible-target-selection','pointer-lock','WASD','wall-collision','jump-land',
       'mouse-look','authoritative-correction','cross-chunk-window','logout-release',
-      'browser-restart-persistent-registry','server-partial-lever-outline','empty-hand-fixture','browser-E-use','real-lever-powered','post-use-revision-refresh'],
-    initial,wall,jumped,final,uses,leverOutline,sectionParts:sections,revisions:bootstraps.map(b=>b.revision)},null,2));
+      'browser-restart-persistent-registry','server-partial-lever-outline','number-key-hotbar','conserved-inventory','browser-E-use','real-lever-powered','post-use-revision-refresh'],
+    initial,wall,jumped,final,uses,leverOutline,hotbars,sectionParts:sections,revisions:bootstraps.map(b=>b.revision)},null,2));
   console.log('Real browser / Minecraft movement and block-use smoke passed');
 } catch(error) {
   const selectionLabels = await page?.evaluate(()=>[...document.querySelectorAll('flt-semantics')]

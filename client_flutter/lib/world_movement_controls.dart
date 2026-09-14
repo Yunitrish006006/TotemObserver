@@ -25,6 +25,20 @@ class _ControlsState extends State<WorldMovementControls> {
   late final WorldPointerCapture _capture;
   Timer? _timer, _outlineIdleTimer, _outlinePollCooldown;
   bool _outlineIdle = false;
+  int? _queuedHotbarSlot;
+  Timer? _hotbarQueueExpiry, _hotbarPollCooldown;
+  final _hotbarQueueClock = Stopwatch();
+  static final _hotbarKeys = [
+    PhysicalKeyboardKey.digit1,
+    PhysicalKeyboardKey.digit2,
+    PhysicalKeyboardKey.digit3,
+    PhysicalKeyboardKey.digit4,
+    PhysicalKeyboardKey.digit5,
+    PhysicalKeyboardKey.digit6,
+    PhysicalKeyboardKey.digit7,
+    PhysicalKeyboardKey.digit8,
+    PhysicalKeyboardKey.digit9,
+  ];
   bool _useQueued = false, _useLookSent = false;
   double _useYaw = 0, _usePitch = 0;
   bool _active = false,
@@ -70,10 +84,19 @@ class _ControlsState extends State<WorldMovementControls> {
       _release();
     } else {
       _pollOutline();
+      if (mounted && !_disposing) setState(() {});
     }
   }
 
+  void _clearHotbarQueue() {
+    _queuedHotbarSlot = null;
+    _hotbarQueueExpiry?.cancel();
+    _hotbarQueueClock.stop();
+  }
+
   void _clear() {
+    _clearHotbarQueue();
+    _hotbarPollCooldown?.cancel();
     _outlineIdleTimer?.cancel();
     _outlinePollCooldown?.cancel();
     _outlineIdle = false;
@@ -133,6 +156,28 @@ class _ControlsState extends State<WorldMovementControls> {
       _release();
       return KeyEventResult.handled;
     }
+    final hotbarSlot = _hotbarKeys.indexOf(event.physicalKey);
+    if (hotbarSlot >= 0 && widget.connection.canRequestHotbar) {
+      if (event is KeyDownEvent &&
+          _focus.hasPrimaryFocus &&
+          !_useQueued &&
+          !widget.connection.blockUsePending) {
+        _queuedHotbarSlot = hotbarSlot;
+        _hotbarQueueClock
+          ..reset()
+          ..start();
+        _hotbarQueueExpiry?.cancel();
+        _hotbarQueueExpiry = Timer(
+          const Duration(milliseconds: 750),
+          _clearHotbarQueue,
+        );
+        _outlineActivity();
+      }
+      return KeyEventResult.handled;
+    }
+    if (event.physicalKey == PhysicalKeyboardKey.keyE &&
+        (_queuedHotbarSlot != null || widget.connection.hotbarPending))
+      return KeyEventResult.handled;
     if (event.physicalKey == PhysicalKeyboardKey.keyE &&
         widget.connection.canUseBlock) {
       if (event is KeyDownEvent &&
@@ -177,6 +222,8 @@ class _ControlsState extends State<WorldMovementControls> {
         !_active ||
         !_focus.hasPrimaryFocus ||
         _useQueued ||
+        _queuedHotbarSlot != null ||
+        c.hotbarPending ||
         _keys.isNotEmpty ||
         _yawDelta != 0 ||
         _pitchDelta != 0 ||
@@ -212,6 +259,31 @@ class _ControlsState extends State<WorldMovementControls> {
       }
       return;
     }
+    if (_queuedHotbarSlot != null) {
+      if (!enabled || _hotbarQueueClock.elapsedMilliseconds >= 750) {
+        _clearHotbarQueue();
+      } else {
+        if (connection.requestHotbar(slot: _queuedHotbarSlot)) {
+          _clearHotbarQueue();
+          _hotbarPollCooldown?.cancel();
+          _hotbarPollCooldown = Timer(const Duration(seconds: 2), () {});
+        }
+        return;
+      }
+    }
+    if (enabled &&
+        connection.canRequestHotbar &&
+        connection.lastMovementApplied &&
+        connection.worldOnGround &&
+        _keys.isEmpty &&
+        _yawDelta == 0 &&
+        _pitchDelta == 0 &&
+        !(_hotbarPollCooldown?.isActive ?? false)) {
+      // Acquire the lease before request/notify can reenter listeners.
+      _hotbarPollCooldown = Timer(const Duration(seconds: 2), () {});
+      if (connection.requestHotbar()) return;
+      _hotbarPollCooldown?.cancel();
+    }
     int held(PhysicalKeyboardKey key) => enabled && _keys.contains(key) ? 1 : 0;
     if (connection.sendMovement(
       strafe: held(PhysicalKeyboardKey.keyA) - held(PhysicalKeyboardKey.keyD),
@@ -232,6 +304,16 @@ class _ControlsState extends State<WorldMovementControls> {
     widget.connection.cancelBlockUsePreparation();
   }
 
+  String _hotbarLabel() {
+    final snapshot = widget.connection.hotbarSnapshot;
+    if (snapshot == null) return '快捷列：操作世界後同步';
+    final selected = snapshot.selected;
+    if (selected == null) return '快捷列：目前無法讀取';
+    final stack = snapshot.slots![selected];
+    final held = stack.count == 0 ? '空手' : '${stack.item} × ${stack.count}';
+    return '快捷列 ${selected + 1}/9 · $held${widget.connection.hotbarPending ? ' · 同步中' : ''}';
+  }
+
   @override
   Widget build(BuildContext context) => Focus(
     focusNode: _focus,
@@ -243,10 +325,12 @@ class _ControlsState extends State<WorldMovementControls> {
       children: [
         widget.child,
         const SizedBox(height: 8),
+        if (widget.connection.canRequestHotbar)
+          Text(_hotbarLabel(), textAlign: TextAlign.center),
         if (widget.connection.canMove)
           _active
               ? Text(
-                  'WASD 移動 · 滑鼠轉向 · Space 跳躍${widget.connection.canUseBlock ? ' · E 使用' : ''} · Esc 釋放',
+                  'WASD 移動 · 滑鼠轉向 · Space 跳躍${widget.connection.canUseBlock ? ' · E 使用' : ''}${widget.connection.canRequestHotbar ? ' · 1–9 選槽' : ''} · Esc 釋放',
                 )
               : TextButton(
                   onPressed: _capture.supported ? _activate : null,

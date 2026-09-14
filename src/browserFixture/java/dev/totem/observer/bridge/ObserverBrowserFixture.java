@@ -92,12 +92,16 @@ public final class ObserverBrowserFixture implements ModInitializer {
             if (server.getPlayerList().getPlayerCount() == 1) {
                 var player = server.getPlayerList().getPlayers().getFirst();
                 if (!player.getUUID().equals(preparedPlayer)) {
-                    // Test setup only: explicitly prepare the empty-hand capability.
-                    // Production never deletes onboarding items or edits inventory for use.
-                    player.setItemInHand(InteractionHand.MAIN_HAND, ItemStack.EMPTY);
+                    // Test-only inventory: the browser must select the existing empty slot.
+                    // Production never creates/removes items to enable interaction.
+                    player.getInventory().setItem(0, new ItemStack(net.minecraft.world.item.Items.STICK, 7));
+                    player.getInventory().setItem(1, ItemStack.EMPTY);
+                    player.getInventory().setSelectedSlot(0);
                     player.setItemInHand(InteractionHand.OFF_HAND, ItemStack.EMPTY);
                     preparedPlayer = player.getUUID();
                 }
+                state.addProperty("selectedSlot", player.getInventory().getSelectedSlot());
+                state.addProperty("slotZeroCount", player.getInventory().getItem(0).getCount());
                 state.addProperty("mainHandEmpty", player.getMainHandItem().isEmpty());
                 state.addProperty("offHandEmpty", player.getOffhandItem().isEmpty());
                 state.addProperty("x", player.getX());
