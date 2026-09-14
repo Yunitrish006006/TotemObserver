@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'outbound_frame_pacer.dart';
 import 'world_target_outline.dart';
 import 'world_hotbar.dart';
+import 'persistent_registry_cache.dart';
 
 import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
@@ -105,8 +106,13 @@ class _WorldSectionAssembly {
 }
 
 class ObserverConnection extends ChangeNotifier {
-  ObserverConnection({BridgeTransport Function(Uri)? open})
-    : _open = open ?? SocketTransport.new;
+  ObserverConnection({
+    BridgeTransport Function(Uri)? open,
+    PersistentRegistryCache? registryCache,
+  }) : _open = open ?? SocketTransport.new,
+       _registryCache = registryCache ?? PersistentRegistryCache();
+  final PersistentRegistryCache _registryCache;
+  bool _restoringRegistry = false;
   final BridgeTransport Function(Uri) _open;
   BridgeTransport? _transport;
   OutboundFramePacer? _pacer;
@@ -278,7 +284,8 @@ class ObserverConnection extends ChangeNotifier {
       registryFingerprint.isNotEmpty && registryTotal > 0;
   bool get canRequestWorldSections =>
       _worldSectionProtocol == 1 && hasWorldBootstrap && hasWorldRegistry;
-  bool get worldRegistryPending => _pendingWorldRegistrySequence >= 0;
+  bool get worldRegistryPending =>
+      _pendingWorldRegistrySequence >= 0 || _restoringRegistry;
   static const maxCachedBlockStates = 4096;
   int get cachedBlockStateCount => _blockStateNames.length;
 
@@ -883,13 +890,24 @@ class ObserverConnection extends ChangeNotifier {
               throw const FormatException();
             }
           }
-          if (registryFingerprint.isEmpty) {
+          final firstRegistryPage = registryFingerprint.isEmpty;
+          if (firstRegistryPage) {
             if (offset != 0) throw const FormatException();
             registryFingerprint = fingerprint;
             registryTotal = total;
           } else if (fingerprint != registryFingerprint ||
               total != registryTotal) {
             throw const FormatException();
+          }
+          if (firstRegistryPage && _registryCache.available) {
+            _restoreRegistry(fingerprint, total, List<String>.from(states));
+          } else {
+            _registryCache.remember(
+              fingerprint,
+              total,
+              offset,
+              List<String>.from(states),
+            );
           }
           _registryDeadline?.cancel();
           _pendingWorldRegistrySequence = -1;
@@ -1303,9 +1321,34 @@ class ObserverConnection extends ChangeNotifier {
     }
   }
 
+  void _restoreRegistry(String fingerprint, int total, List<String> firstPage) {
+    final generation = _generation;
+    _restoringRegistry = true;
+    unawaited(
+      _registryCache.restore(fingerprint, total).then((pages) {
+        if (generation != _generation ||
+            !playerAttached ||
+            registryFingerprint != fingerprint ||
+            registryTotal != total)
+          return;
+        // The fresh server page always wins. Stored names remain render-only data.
+        for (final page in pages.entries) {
+          for (int i = 0; i < page.value.length; i++) {
+            _blockStateNames.putIfAbsent(page.key + i, () => page.value[i]);
+          }
+        }
+        _registryCache.remember(fingerprint, total, 0, firstPage);
+        _restoringRegistry = false;
+        _worldGeometryRevision++;
+        _notify();
+      }),
+    );
+  }
+
   void _requestWorldRegistry(int offset) {
     if (phase != ConnectionPhase.connected ||
         _worldRegistryProtocol != 1 ||
+        _restoringRegistry ||
         !playerAttached ||
         offset < 0 ||
         (_registryCooldown?.isActive ?? false) ||
@@ -1338,7 +1381,25 @@ class ObserverConnection extends ChangeNotifier {
         _blockStateNames.containsKey(rawId)) {
       return;
     }
-    _requestWorldRegistry((rawId ~/ 8) * 8);
+    final offset = (rawId ~/ 8) * 8;
+    final cached = _registryCache.page(
+      registryFingerprint,
+      registryTotal,
+      offset,
+    );
+    if (cached != null && !_restoringRegistry) {
+      while (_blockStateNames.length + cached.length > maxCachedBlockStates) {
+        final oldest = (_blockStateNames.keys.first ~/ 8) * 8;
+        _blockStateNames.removeWhere((id, _) => id ~/ 8 == oldest ~/ 8);
+      }
+      for (int i = 0; i < cached.length; i++) {
+        _blockStateNames[offset + i] = cached[i];
+      }
+      _worldGeometryRevision++;
+      _notify();
+      return;
+    }
+    _requestWorldRegistry(offset);
   }
 
   void requestWorldSection(int chunkX, int chunkZ, int sectionY) {
@@ -1549,6 +1610,7 @@ class ObserverConnection extends ChangeNotifier {
     bootstrapCenterChunkX = 0;
     bootstrapCenterChunkZ = 0;
     bootstrapRadius = 0;
+    _restoringRegistry = false;
     registryFingerprint = '';
     registryTotal = 0;
     _blockStateNames.clear();
