@@ -12,7 +12,7 @@ loss, disconnect, connection replacement and disposal cancel polling ownership.
 There is at most one connection-owned outline request; no polling history or
 queue is retained. Ordinary idle movement keeps a still-current outline, while
 camera changes, cache generations and the client 500 ms TTL still invalidate it.
-An E press may prepare while an outline read is in flight, then waits for that
+A right click may prepare while an outline read is in flight, then waits for that
 read before sending its existing idle-look confirmation and use intent. No
 interaction is sent concurrently with capture or without server validation.
 
@@ -38,6 +38,6 @@ Pure projection and widget tests cover bounded partial geometry, clipping, stale
 camera rejection, idle polling, held-key priority and capture-loss invalidation.
 The real browser/Minecraft smoke now requires a server-selected partial lever
 outline and the production semantics state before saving server-lever-outline.png,
-then continues E use, movement, collision, jumping and window-refresh checks.
+then continues right-click use, movement, collision, jumping and window-refresh checks.
 The screenshot must be visually reviewed; semantics alone is not visual proof.
 Actual CI and screenshot review results are recorded in the stacked PR.

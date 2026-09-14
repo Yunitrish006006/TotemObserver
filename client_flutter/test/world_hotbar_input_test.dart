@@ -46,7 +46,7 @@ void main() {
     expect(request['slot'], 1);
     expect(find.textContaining('快捷列 2/9'), findsNothing);
     await tester.sendKeyRepeatEvent(LogicalKeyboardKey.digit2);
-    await tester.sendKeyEvent(LogicalKeyboardKey.keyE);
+    capture.onUse?.call();
     expect(c.blockUsePreparing, isFalse);
     s.receive(
       hotbar.response(

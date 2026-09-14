@@ -58,6 +58,7 @@ class _ControlsState extends State<WorldMovementControls> {
   void initState() {
     super.initState();
     _capture = widget.captureFactory(_captureChanged, _look);
+    _capture.onUse = _queueUse;
     widget.connection.addListener(_connectionChanged);
     _timer = Timer.periodic(
       const Duration(milliseconds: 110),
@@ -175,25 +176,6 @@ class _ControlsState extends State<WorldMovementControls> {
       }
       return KeyEventResult.handled;
     }
-    if (event.physicalKey == PhysicalKeyboardKey.keyE &&
-        (_queuedHotbarSlot != null || widget.connection.hotbarPending))
-      return KeyEventResult.handled;
-    if (event.physicalKey == PhysicalKeyboardKey.keyE &&
-        widget.connection.canUseBlock) {
-      if (event is KeyDownEvent &&
-          !_useQueued &&
-          _focus.hasPrimaryFocus &&
-          widget.connection.prepareBlockUse()) {
-        _outlineActivity();
-        _useQueued = true;
-        _useLookSent = false;
-        _useYaw = widget.connection.worldYaw + _yawDelta;
-        _usePitch = widget.connection.worldPitch + _pitchDelta;
-        _yawDelta = 0;
-        _pitchDelta = 0;
-      }
-      return KeyEventResult.handled;
-    }
     if (!_allowed.contains(event.physicalKey)) return KeyEventResult.ignored;
     _outlineActivity();
     if (event is KeyUpEvent) {
@@ -202,6 +184,26 @@ class _ControlsState extends State<WorldMovementControls> {
       _keys.add(event.physicalKey);
     }
     return KeyEventResult.handled;
+  }
+
+  void _queueUse() {
+    final c = widget.connection;
+    if (!_active ||
+        !_focus.hasPrimaryFocus ||
+        !c.canUseBlock ||
+        _useQueued ||
+        _queuedHotbarSlot != null ||
+        c.hotbarPending ||
+        !c.prepareBlockUse())
+      return;
+    // Capture the intended look once; subsequent clicks cannot replay an action.
+    _outlineActivity();
+    _useQueued = true;
+    _useLookSent = false;
+    _useYaw = c.worldYaw + _yawDelta;
+    _usePitch = c.worldPitch + _pitchDelta;
+    _yawDelta = 0;
+    _pitchDelta = 0;
   }
 
   void _outlineActivity() {
@@ -330,7 +332,7 @@ class _ControlsState extends State<WorldMovementControls> {
         if (widget.connection.canMove)
           _active
               ? Text(
-                  'WASD 移動 · 滑鼠轉向 · Space 跳躍${widget.connection.canUseBlock ? ' · E 使用' : ''}${widget.connection.canRequestHotbar ? ' · 1–9 選槽' : ''} · Esc 釋放',
+                  'WASD 移動 · 滑鼠轉向 · Space 跳躍${widget.connection.canUseBlock ? ' · 右鍵使用' : ''}${widget.connection.canRequestHotbar ? ' · 1–9 選槽' : ''} · Esc 釋放',
                 )
               : TextButton(
                   onPressed: _capture.supported ? _activate : null,

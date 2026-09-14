@@ -96,6 +96,7 @@ try {
   assert.equal(movements.length,0);
   await activate.click();
   await page.waitForFunction(() => document.pointerLockElement !== null);
+  assert.equal(await page.evaluate(()=>document.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,button:2}))),false,'Owned capture suppresses context menu');
   await page.waitForFunction(() => [...document.querySelectorAll('[aria-label]')].some(node => node.getAttribute('aria-label')?.includes('WASD')) || document.body.textContent.includes('WASD'));
   await page.keyboard.down('w'); await page.keyboard.down('Space');
   await page.mouse.move(500,400); await page.mouse.move(580,440);
@@ -112,6 +113,7 @@ try {
   await page.keyboard.up('w'); await page.keyboard.up('Space');
   await page.keyboard.press('Escape');
   await page.waitForFunction(() => document.pointerLockElement === null);
+  assert.equal(await page.evaluate(()=>document.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,button:2}))),true,'Released capture preserves context menu');
   const releasedAt = Date.now();
   while ((movements.at(-1)?.forward !== 0 || movements.at(-1)?.jump !== 0) && Date.now()-releasedAt < 5000) await page.waitForTimeout(50);
   assert.equal(movements.at(-1).forward,0); assert.equal(movements.at(-1).jump,0);
@@ -125,7 +127,7 @@ try {
   const count = movements.length; await page.waitForTimeout(300);
   assert.equal(movements.length,count); assert.equal(errors.length,0);
   await writeFile(resolve(evidence,'movement-input-result.json'),JSON.stringify({passed:true,
-    fixture:'bounded protocol fixture; no Minecraft physics',checks:['actual-pointer-lock','WASD-jump','mouse-delta','movement-during-streaming','chunk-window-revision','escape','disconnect'],playable:false},null,2));
+    fixture:'bounded protocol fixture; no Minecraft physics',checks:['actual-pointer-lock','scoped-context-menu','WASD-jump','mouse-delta','movement-during-streaming','chunk-window-revision','escape','disconnect'],playable:false},null,2));
   console.log('Browser pointer-lock input fixture passed (not a Minecraft playable smoke)');
 } catch(error) {
   console.log(JSON.stringify({recentOperations:operationTypes}));

@@ -12,7 +12,7 @@ replace them. The test checks walking into a two-block-high wall, jumping and
 landing, strafing around the wall, crossing a chunk boundary, acknowledged mouse
 look, matching server correction, and logout removal from PlayerList. Before
 walking, it aims at a fixture lever using real mouse deltas and authoritative
-corrections, presses E, checks the exact intent-only request and bound applied
+corrections, right-clicks, checks the exact intent-only request and bound applied
 response, verifies the real server lever is powered, and waits for a newer
 bootstrap revision. No interaction protocol frame is injected.
 

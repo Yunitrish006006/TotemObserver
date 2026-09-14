@@ -16,6 +16,8 @@ class TestCapture implements WorldPointerCapture {
   final void Function(double, double) look;
   bool requested = false, disposed = false;
   @override
+  void Function()? onUse;
+  @override
   bool get supported => true;
   @override
   void request() {

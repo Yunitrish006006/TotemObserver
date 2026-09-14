@@ -9,7 +9,7 @@ authorization bindings and confirmation.
 
 A queued selection waits for previous movement/outline/use responses before
 sending. The input loop yields movement dispatch while this bounded intent waits;
-server deadman/physics remain authoritative. E-use preparation cannot overtake a
+server deadman/physics remain authoritative. Use preparation cannot overtake a
 queued/in-flight selection. Unsent selections are never replayed after release.
 Idle, grounded, captured controls request an authoritative read at most once every
 two seconds; held movement/look and use take priority. No renderer polls.
@@ -26,5 +26,4 @@ two through key 2, checks both server selection and conservation, and uses the
 lever through the existing authoritative interaction path. Fixture setup alone
 sets items; production never deletes onboarding inventory to make use succeed.
 A screenshot captures the confirmed hotbar footer. Formal results belong in PR
-Validation. Right-click use is the next independent input slice; this slice still
-uses E. `play:false` and read-only Observer Screen safety remain unchanged.
+Validation. Right-click use is provided by the following input slice. `play:false` and read-only Observer Screen safety remain unchanged.
