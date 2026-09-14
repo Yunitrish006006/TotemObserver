@@ -9,6 +9,8 @@ class _Unavailable implements WorldPointerCapture {
   @override
   void Function()? onUse;
   @override
+  void Function(bool)? onDestroy;
+  @override
   bool get supported => false;
   @override
   void request() {}

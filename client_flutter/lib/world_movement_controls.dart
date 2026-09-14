@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'connection.dart';
+import 'world_destroy.dart';
 import 'world_pointer_capture.dart';
 
 /// Input owner; the child renderer consumes authoritative state only.
@@ -41,6 +42,13 @@ class _ControlsState extends State<WorldMovementControls> {
   ];
   bool _useQueued = false, _useLookSent = false;
   double _useYaw = 0, _usePitch = 0;
+  bool _digPressed = false,
+      _digHeld = false,
+      _digQueued = false,
+      _digLookSent = false,
+      _digOwned = false,
+      _digNeedsMove = false;
+  double _digYaw = 0, _digPitch = 0;
   bool _active = false,
       _started = false,
       _requested = false,
@@ -59,6 +67,7 @@ class _ControlsState extends State<WorldMovementControls> {
     super.initState();
     _capture = widget.captureFactory(_captureChanged, _look);
     _capture.onUse = _queueUse;
+    _capture.onDestroy = _destroyInput;
     widget.connection.addListener(_connectionChanged);
     _timer = Timer.periodic(
       const Duration(milliseconds: 110),
@@ -72,6 +81,8 @@ class _ControlsState extends State<WorldMovementControls> {
     if (!identical(oldWidget.connection, widget.connection)) {
       oldWidget.connection.removeListener(_connectionChanged);
       oldWidget.connection.cancelBlockUsePreparation();
+      oldWidget.connection.cancelDestroyPreparation();
+      oldWidget.connection.sendBlockDestroy(WorldDestroyAction.cancel);
       oldWidget.connection.clearTargetOutline();
       _started = false;
       _release();
@@ -96,6 +107,7 @@ class _ControlsState extends State<WorldMovementControls> {
   }
 
   void _clear() {
+    _destroyInput(false);
     _clearHotbarQueue();
     _hotbarPollCooldown?.cancel();
     _outlineIdleTimer?.cancel();
@@ -141,6 +153,7 @@ class _ControlsState extends State<WorldMovementControls> {
 
   void _look(double dx, double dy) {
     if (_useQueued ||
+        _digQueued ||
         !_active ||
         !_focus.hasPrimaryFocus ||
         !dx.isFinite ||
@@ -162,6 +175,8 @@ class _ControlsState extends State<WorldMovementControls> {
       if (event is KeyDownEvent &&
           _focus.hasPrimaryFocus &&
           !_useQueued &&
+          !_digPressed &&
+          !widget.connection.destroyActive &&
           !widget.connection.blockUsePending) {
         _queuedHotbarSlot = hotbarSlot;
         _hotbarQueueClock
@@ -192,6 +207,8 @@ class _ControlsState extends State<WorldMovementControls> {
         !_focus.hasPrimaryFocus ||
         !c.canUseBlock ||
         _useQueued ||
+        _digPressed ||
+        c.destroyActive ||
         _queuedHotbarSlot != null ||
         c.hotbarPending ||
         !c.prepareBlockUse())
@@ -224,6 +241,8 @@ class _ControlsState extends State<WorldMovementControls> {
         !_active ||
         !_focus.hasPrimaryFocus ||
         _useQueued ||
+        _digQueued ||
+        c.destroyActive ||
         _queuedHotbarSlot != null ||
         c.hotbarPending ||
         _keys.isNotEmpty ||
@@ -241,8 +260,52 @@ class _ControlsState extends State<WorldMovementControls> {
 
   void _sample() {
     final connection = widget.connection;
+    // Drain cancellation even after capture loss or replacement of the widget.
+    // The server lease still expires if a pending request prevents delivery.
+    if (connection.destroyActive && (!_digOwned || !_digHeld)) {
+      connection.sendBlockDestroy(WorldDestroyAction.cancel);
+      return;
+    }
+    if (_digOwned && !connection.destroyActive) {
+      _digOwned = false;
+      _digHeld = false; // A new physical press is required after terminal ack.
+    }
     if (!_started || !connection.canMove) return;
     final enabled = _active && _focus.hasPrimaryFocus;
+    if (_digQueued) {
+      if (!enabled || !connection.destroyPreparing) {
+        _destroyInput(false);
+      } else if (!_digLookSent) {
+        _digLookSent = connection.sendMovement(
+          strafe: 0,
+          forward: 0,
+          yaw: _digYaw,
+          pitch: _digPitch,
+          jump: false,
+        );
+      } else if (!connection.movementPending) {
+        if (!connection.lastMovementApplied) {
+          _destroyInput(false);
+        } else if (connection.sendBlockDestroy(WorldDestroyAction.start)) {
+          _digQueued = false;
+          _digOwned = true;
+          _digNeedsMove = true;
+        }
+      }
+      return;
+    }
+    if (_digOwned && !enabled) {
+      _destroyInput(false);
+      return;
+    }
+    if (_digOwned && !_digNeedsMove && !connection.movementPending) {
+      if (!connection.lastMovementApplied) {
+        _destroyInput(false);
+      } else if (connection.sendBlockDestroy(WorldDestroyAction.hold)) {
+        _digNeedsMove = true;
+      }
+      return;
+    }
     if (_useQueued) {
       if (!enabled || !connection.blockUsePreparing) {
         _cancelUse();
@@ -274,6 +337,7 @@ class _ControlsState extends State<WorldMovementControls> {
       }
     }
     if (enabled &&
+        !_digOwned &&
         connection.canRequestHotbar &&
         connection.lastMovementApplied &&
         connection.worldOnGround &&
@@ -297,7 +361,41 @@ class _ControlsState extends State<WorldMovementControls> {
       // New deltas after this send are rebased on the next server correction.
       _yawDelta = 0;
       _pitchDelta = 0;
+      if (_digOwned) _digNeedsMove = false;
     }
+  }
+
+  void _destroyInput(bool held) {
+    final c = widget.connection;
+    if (!held) {
+      _digPressed = false;
+      _digHeld = false;
+      _digQueued = false;
+      _digLookSent = false;
+      c.cancelDestroyPreparation();
+      if (c.destroyActive) c.sendBlockDestroy(WorldDestroyAction.cancel);
+      return;
+    }
+    if (_digPressed) return;
+    _digPressed = true;
+    if (!c.destroyActive) _digOwned = false;
+    if (!_active ||
+        !_focus.hasPrimaryFocus ||
+        !c.canDestroyBlock ||
+        _useQueued ||
+        c.blockUsePending ||
+        _queuedHotbarSlot != null ||
+        c.hotbarPending ||
+        !c.prepareBlockDestroy())
+      return;
+    _digHeld = true;
+    _digQueued = true;
+    _digLookSent = false;
+    _digYaw = c.worldYaw + _yawDelta;
+    _digPitch = c.worldPitch + _pitchDelta;
+    _yawDelta = 0;
+    _pitchDelta = 0;
+    _outlineActivity();
   }
 
   void _cancelUse() {
@@ -329,10 +427,15 @@ class _ControlsState extends State<WorldMovementControls> {
         const SizedBox(height: 8),
         if (widget.connection.canRequestHotbar)
           Text(_hotbarLabel(), textAlign: TextAlign.center),
+        if (widget.connection.destroySnapshot?.outcome == 'active')
+          Text(
+            '挖掘 ${(widget.connection.destroySnapshot!.progress * 100).floor()}%',
+            textAlign: TextAlign.center,
+          ),
         if (widget.connection.canMove)
           _active
               ? Text(
-                  'WASD 移動 · 滑鼠轉向 · Space 跳躍${widget.connection.canUseBlock ? ' · 右鍵使用' : ''}${widget.connection.canRequestHotbar ? ' · 1–9 選槽' : ''} · Esc 釋放',
+                  'WASD 移動 · 滑鼠轉向 · Space 跳躍${widget.connection.canDestroyBlock ? ' · 按住左鍵挖掘' : ''}${widget.connection.canUseBlock ? ' · 右鍵使用' : ''}${widget.connection.canRequestHotbar ? ' · 1–9 選槽' : ''} · Esc 釋放',
                 )
               : TextButton(
                   onPressed: _capture.supported ? _activate : null,

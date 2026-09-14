@@ -27,6 +27,7 @@ public final class ObserverBrowserFixture implements ModInitializer {
     private int ticks;
     private java.util.UUID preparedPlayer;
     private static final BlockPos LEVER = new BlockPos(10, 65, 10);
+    private static final BlockPos DIRT = new BlockPos(8, 64, 11);
 
     @Override
     public void onInitialize() {
@@ -60,6 +61,7 @@ public final class ObserverBrowserFixture implements ModInitializer {
             }
             level.setRespawnData(LevelData.RespawnData.of(level.dimension(), new BlockPos(8, 64, 8), 0, 25));
             level.setBlock(LEVER.south(), Blocks.STONE.defaultBlockState(), 3);
+            level.setBlock(DIRT, Blocks.DIRT.defaultBlockState(), 3);
             level.setBlock(LEVER, Blocks.LEVER.defaultBlockState()
                     .setValue(LeverBlock.FACE, AttachFace.WALL)
                     .setValue(LeverBlock.FACING, Direction.NORTH)
@@ -89,6 +91,7 @@ public final class ObserverBrowserFixture implements ModInitializer {
             state.addProperty("tick", server.getTickCount());
             state.addProperty("players", server.getPlayerList().getPlayerCount());
             state.addProperty("leverPowered", server.overworld().getBlockState(LEVER).getValue(LeverBlock.POWERED));
+            state.addProperty("miningTargetRemoved", server.overworld().getBlockState(DIRT).isAir());
             if (server.getPlayerList().getPlayerCount() == 1) {
                 var player = server.getPlayerList().getPlayers().getFirst();
                 if (!player.getUUID().equals(preparedPlayer)) {
