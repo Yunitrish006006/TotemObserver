@@ -188,7 +188,8 @@ try {
   assert.ok(leverOutline.target.boxes.every(b=>b.length===6 && b[3]-b[0]<1),'Actual partial lever outline');
   await page.screenshot({path:resolve(evidence,'server-lever-outline.png')});
   const beforeUseRevision=bootstraps.at(-1).revision;
-  await page.keyboard.press('e');
+  await page.mouse.down({button:'right'});
+  await page.mouse.up({button:'right'});
   await waitFor(()=>uses.length===1,'browser use acknowledgment');
   assert.equal(uses[0].outcome,'applied');
   assert.equal(uses[0].refreshRequired,true);
@@ -294,7 +295,7 @@ try {
   await writeFile(resolve(evidence,'result.json'),JSON.stringify({passed:true,fixture:ready.fixture,
     checks:['real-admission','terrain-snapshots','visible-target-selection','pointer-lock','WASD','wall-collision','jump-land',
       'mouse-look','authoritative-correction','cross-chunk-window','logout-release',
-      'browser-restart-persistent-registry','server-partial-lever-outline','number-key-hotbar','conserved-inventory','browser-E-use','real-lever-powered','post-use-revision-refresh'],
+      'browser-restart-persistent-registry','server-partial-lever-outline','number-key-hotbar','conserved-inventory','browser-right-click-use','real-lever-powered','post-use-revision-refresh'],
     initial,wall,jumped,final,uses,leverOutline,hotbars,sectionParts:sections,revisions:bootstraps.map(b=>b.revision)},null,2));
   console.log('Real browser / Minecraft movement and block-use smoke passed');
 } catch(error) {

@@ -7,6 +7,8 @@ WorldPointerCapture createWorldPointerCapture(
 
 class _Unavailable implements WorldPointerCapture {
   @override
+  void Function()? onUse;
+  @override
   bool get supported => false;
   @override
   void request() {}
