@@ -26,13 +26,16 @@ Only one outline is retained. Its getter requires identical current authoritativ
 XYZ/yaw/pitch and the cache geometry generation at request time. Null targets and
 camera/generation mismatch display nothing. A 500 ms timer clears the snapshot;
 a monotonic Stopwatch also prevents a delayed event loop from extending its
-display lifetime. Movement/use/bootstrap submission clears it immediately.
+display lifetime. Nonzero movement, jump, changed look, use or bootstrap submission clears it
+immediately; an unchanged idle heartbeat preserves a still-current selection.
 Disconnect cancels timers and clears both request and display state.
 
 `clearTargetOutline()` invalidates display ownership, including a capture still
 in flight, without cancelling its wire request. The eventual reply must still
 validate and retire that request, but cannot restore the cleared display.
-Callers managing focus/pointer lifecycle must also arrange their UI repaint.
+Callers managing focus/pointer lifecycle use `clearTargetOutline(notify: true)`
+to invalidate the display and request repaint; internal submission paths avoid
+reentrant notification until their pending state is established.
 No history, target cache, polling timer or renderer is added by this slice.
 The following UI slice owns bounded polling and painting actual selection boxes.
 These boxes are not full-block models, collision truth or interaction grants.

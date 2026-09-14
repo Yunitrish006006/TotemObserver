@@ -23,7 +23,8 @@ class _ControlsState extends State<WorldMovementControls> {
   final _focus = FocusNode(debugLabel: 'Observer world controls');
   final Set<PhysicalKeyboardKey> _keys = {};
   late final WorldPointerCapture _capture;
-  Timer? _timer;
+  Timer? _timer, _outlineIdleTimer, _outlinePollCooldown;
+  bool _outlineIdle = false;
   bool _useQueued = false, _useLookSent = false;
   double _useYaw = 0, _usePitch = 0;
   bool _active = false,
@@ -56,6 +57,7 @@ class _ControlsState extends State<WorldMovementControls> {
     if (!identical(oldWidget.connection, widget.connection)) {
       oldWidget.connection.removeListener(_connectionChanged);
       oldWidget.connection.cancelBlockUsePreparation();
+      oldWidget.connection.clearTargetOutline();
       _started = false;
       _release();
       widget.connection.addListener(_connectionChanged);
@@ -66,10 +68,16 @@ class _ControlsState extends State<WorldMovementControls> {
     if (!widget.connection.canMove) {
       _started = false;
       _release();
+    } else {
+      _pollOutline();
     }
   }
 
   void _clear() {
+    _outlineIdleTimer?.cancel();
+    _outlinePollCooldown?.cancel();
+    _outlineIdle = false;
+    widget.connection.clearTargetOutline(notify: true);
     _cancelUse();
     _keys.clear();
     _yawDelta = 0;
@@ -87,7 +95,10 @@ class _ControlsState extends State<WorldMovementControls> {
       _clear();
     }
     if (_active != active) setState(() => _active = active);
-    if (active) _started = true;
+    if (active) {
+      _started = true;
+      _outlineActivity();
+    }
   }
 
   void _release() {
@@ -111,6 +122,7 @@ class _ControlsState extends State<WorldMovementControls> {
         !dx.isFinite ||
         !dy.isFinite)
       return;
+    _outlineActivity();
     _yawDelta = (_yawDelta + dx.clamp(-200, 200) * 0.15).clamp(-180, 180);
     _pitchDelta = (_pitchDelta + dy.clamp(-200, 200) * 0.15).clamp(-90, 90);
   }
@@ -127,6 +139,7 @@ class _ControlsState extends State<WorldMovementControls> {
           !_useQueued &&
           _focus.hasPrimaryFocus &&
           widget.connection.prepareBlockUse()) {
+        _outlineActivity();
         _useQueued = true;
         _useLookSent = false;
         _useYaw = widget.connection.worldYaw + _yawDelta;
@@ -137,12 +150,44 @@ class _ControlsState extends State<WorldMovementControls> {
       return KeyEventResult.handled;
     }
     if (!_allowed.contains(event.physicalKey)) return KeyEventResult.ignored;
+    _outlineActivity();
     if (event is KeyUpEvent) {
       _keys.remove(event.physicalKey);
     } else {
       _keys.add(event.physicalKey);
     }
     return KeyEventResult.handled;
+  }
+
+  void _outlineActivity() {
+    _outlineIdle = false;
+    widget.connection.clearTargetOutline(notify: true);
+    _outlineIdleTimer?.cancel();
+    _outlineIdleTimer = Timer(const Duration(milliseconds: 330), () {
+      _outlineIdle = true;
+      _pollOutline();
+    });
+    if (mounted && !_disposing) setState(() {});
+  }
+
+  void _pollOutline() {
+    final c = widget.connection;
+    if (_disposing ||
+        !_outlineIdle ||
+        !_active ||
+        !_focus.hasPrimaryFocus ||
+        _useQueued ||
+        _keys.isNotEmpty ||
+        _yawDelta != 0 ||
+        _pitchDelta != 0 ||
+        !c.worldOnGround ||
+        !c.lastMovementApplied ||
+        !c.canRequestTargetOutline ||
+        (_outlinePollCooldown?.isActive ?? false))
+      return;
+    // Set the lease before send/notify to guard reentrant connection listeners.
+    _outlinePollCooldown = Timer(const Duration(milliseconds: 500), () {});
+    if (!c.requestTargetOutline()) _outlinePollCooldown?.cancel();
   }
 
   void _sample() {

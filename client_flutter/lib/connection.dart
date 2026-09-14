@@ -1027,11 +1027,13 @@ class ObserverConnection extends ChangeNotifier {
   }
 
   /// Clears display ownership without cancelling an already-sent wire request.
-  void clearTargetOutline() {
+  void clearTargetOutline({bool notify = false}) {
+    final changed = _outline != null || _outlineGeometry >= 0;
     _outline = null;
     _outlineGeometry = -1;
     _outlineExpiry?.cancel();
     _outlineClock.stop();
+    if (notify && changed) _notify();
   }
 
   /// Sends an immediate use intent only after previous world work has drained.
@@ -1079,7 +1081,6 @@ class ObserverConnection extends ChangeNotifier {
   /// prior work. This lease expires even if the input owner stops sampling.
   bool prepareBlockUse() {
     if (!canUseBlock ||
-        outlinePending ||
         blockUsePending ||
         blockUsePreparing ||
         worldWindowRefreshing)
@@ -1125,7 +1126,13 @@ class ObserverConnection extends ChangeNotifier {
     final wrappedYaw = ((yaw + 180) % 360) - 180;
     try {
       final seq = _sequence++;
-      clearTargetOutline();
+      if (strafe != 0 ||
+          forward != 0 ||
+          jump ||
+          wrappedYaw != worldYaw ||
+          pitch.clamp(-90, 90) != worldPitch) {
+        clearTargetOutline();
+      }
       _pendingMovementSequence = seq;
       _movementCooldown = Timer(const Duration(milliseconds: 100), () {});
       _movementDeadline = Timer(

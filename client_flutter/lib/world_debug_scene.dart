@@ -6,6 +6,7 @@ import 'connection.dart';
 import 'world_debug_block_target.dart';
 import 'world_debug_voxel_mesh.dart';
 import 'world_visible_view.dart';
+import 'world_target_outline.dart';
 
 @immutable
 class WorldDebugCamera {
@@ -263,6 +264,88 @@ abstract final class WorldDebugScene {
     return List.unmodifiable(result);
   }
 
+  /// At most 16 boxes * 12 edges, clipped before perspective division.
+  /// This debug selection overlay does not supply surfaces or collision geometry.
+  static List<(Offset, Offset)> projectOutline(
+    WorldTargetOutlineSnapshot outline,
+    WorldDebugCamera camera,
+    Size size,
+  ) {
+    final target = outline.target;
+    if (target == null ||
+        !camera.valid ||
+        outline.x != camera.x ||
+        outline.y != camera.y ||
+        outline.z != camera.z ||
+        outline.yaw != camera.yaw ||
+        outline.pitch != camera.pitch ||
+        (outline.eyeY - camera.y - WorldDebugCamera.eyeHeight).abs() >
+            0.00001 ||
+        !size.width.isFinite ||
+        !size.height.isFinite ||
+        size.width < 1 ||
+        size.height < 1 ||
+        size.width > 16384 ||
+        size.height > 16384)
+      return const [];
+    final aspect = size.width / size.height,
+        tanHalfFov = math.tan(70 * math.pi / 360);
+    final planes = <double Function(_Point)>[
+      (p) => p.z - near,
+      (p) => far - p.z,
+      (p) => p.z * tanHalfFov * aspect + p.x,
+      (p) => p.z * tanHalfFov * aspect - p.x,
+      (p) => p.z * tanHalfFov + p.y,
+      (p) => p.z * tanHalfFov - p.y,
+    ];
+    Offset screen(_Point p) => Offset(
+      size.width / 2 + p.x / p.z * size.height / (2 * tanHalfFov),
+      size.height / 2 - p.y / p.z * size.height / (2 * tanHalfFov),
+    );
+    final result = <(Offset, Offset)>[];
+    for (final box in target.boxes.take(16)) {
+      final vertices = <_Point>[
+        for (int i = 0; i < 8; i++)
+          camera.transform(
+            _Point(
+              target.x + (i & 1 == 0 ? box.minX : box.maxX),
+              target.y + (i & 2 == 0 ? box.minY : box.maxY),
+              target.z + (i & 4 == 0 ? box.minZ : box.maxZ),
+            ),
+          ),
+      ];
+      for (int i = 0; i < 8; i++) {
+        for (final axis in [1, 2, 4]) {
+          if (i & axis != 0) continue;
+          var a = vertices[i], b = vertices[i | axis];
+          bool visible = true;
+          for (final plane in planes) {
+            final da = plane(a), db = plane(b);
+            if (da < 0 && db < 0) {
+              visible = false;
+              break;
+            }
+            if ((da < 0) != (db < 0)) {
+              final t = da / (da - db);
+              final crossing = _Point(
+                a.x + t * (b.x - a.x),
+                a.y + t * (b.y - a.y),
+                a.z + t * (b.z - a.z),
+              );
+              if (da < 0) {
+                a = crossing;
+              } else {
+                b = crossing;
+              }
+            }
+          }
+          if (visible) result.add((screen(a), screen(b)));
+        }
+      }
+    }
+    return List.unmodifiable(result);
+  }
+
   static List<_Point> _clip(List<_Point> input, double Function(_Point) plane) {
     if (input.isEmpty) return input;
     final output = <_Point>[];
@@ -328,6 +411,9 @@ class _WorldDebugSceneViewState extends State<WorldDebugSceneView> {
       _geometryRevision = connection.worldGeometryRevision;
     }
     final faces = _faces;
+    final outline = WorldDebugScene.accepts(connection, plan)
+        ? connection.targetOutline
+        : null;
     final target = WorldDebugScene.target(connection, plan, faces);
 
     final camera = WorldDebugCamera(
@@ -337,28 +423,55 @@ class _WorldDebugSceneViewState extends State<WorldDebugSceneView> {
       yaw: connection.worldYaw,
       pitch: connection.worldPitch,
     );
-    return Semantics(
-      label: target == null
-          ? '3D 偵錯地形，視角來自伺服器角色位置與朝向'
-          : '3D 偵錯地形，準星選取 ${target.blockId}',
-      child: AspectRatio(
-        aspectRatio: 16 / 9,
-        child: ClipRect(
-          child: CustomPaint(
-            key: const ValueKey('world-debug-scene'),
-            painter: WorldDebugScenePainter(faces, camera, target: target),
-          ),
-        ),
+    return AspectRatio(
+      aspectRatio: 16 / 9,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final visibleOutline =
+              outline != null &&
+                  WorldDebugScene.projectOutline(
+                    outline,
+                    camera,
+                    constraints.biggest,
+                  ).isNotEmpty
+              ? outline
+              : null;
+          final visibleTarget = visibleOutline == null ? target : null;
+          return Semantics(
+            label: visibleOutline != null
+                ? '3D 偵錯地形，伺服器選取輪廓'
+                : visibleTarget == null
+                ? '3D 偵錯地形，視角來自伺服器角色位置與朝向'
+                : '3D 偵錯地形，準星選取 ${visibleTarget.blockId}',
+            child: ClipRect(
+              child: CustomPaint(
+                key: const ValueKey('world-debug-scene'),
+                painter: WorldDebugScenePainter(
+                  faces,
+                  camera,
+                  target: visibleTarget,
+                  outline: visibleOutline,
+                ),
+              ),
+            ),
+          );
+        },
       ),
     );
   }
 }
 
 class WorldDebugScenePainter extends CustomPainter {
-  const WorldDebugScenePainter(this.faces, this.camera, {this.target});
+  const WorldDebugScenePainter(
+    this.faces,
+    this.camera, {
+    this.target,
+    this.outline,
+  });
   final List<WorldDebugVoxelFace> faces;
   final WorldDebugCamera camera;
   final WorldDebugVoxelFace? target;
+  final WorldTargetOutlineSnapshot? outline;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -390,6 +503,20 @@ class WorldDebugScenePainter extends CustomPainter {
             ..style = PaintingStyle.stroke
             ..strokeWidth = 2,
         );
+      }
+    }
+    final selection = outline;
+    if (selection != null) {
+      paint
+        ..color = Colors.white
+        ..strokeWidth = 2
+        ..style = PaintingStyle.stroke;
+      for (final (a, b) in WorldDebugScene.projectOutline(
+        selection,
+        camera,
+        size,
+      )) {
+        canvas.drawLine(a, b, paint);
       }
     }
     paint
