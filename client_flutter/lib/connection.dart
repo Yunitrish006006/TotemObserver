@@ -206,6 +206,7 @@ class ObserverConnection extends ChangeNotifier {
   bool get worldWindowRefreshing =>
       _worldWindowRefreshNeeded || _pendingWorldBootstrapSequence >= 0;
   bool get canSendWorldSectionNow =>
+      (!canMove || (_pacer?.canSendBackgroundImmediately ?? false)) &&
       !destroyPreparing &&
       !destroyActive &&
       !destroyPending &&
@@ -400,6 +401,7 @@ class ObserverConnection extends ChangeNotifier {
       final transport = _open(uri);
       _transport = transport;
       _pacer = OutboundFramePacer(
+        onBackgroundAvailable: _notify,
         write: transport.send,
         onError: () => _fail('連線已中斷'),
       );
@@ -1145,7 +1147,9 @@ class ObserverConnection extends ChangeNotifier {
         blockUsePreparing ||
         worldWindowRefreshing ||
         (_hotbarCooldown?.isActive ?? false) ||
-        !(_pacer?.canSendImmediately ?? false))
+        !(slot == null
+            ? (_pacer?.canSendBackgroundImmediately ?? false)
+            : (_pacer?.canSendImmediately ?? false)))
       return false;
     try {
       final seq = _sequence++;
@@ -1188,7 +1192,7 @@ class ObserverConnection extends ChangeNotifier {
         blockUsePreparing ||
         worldWindowRefreshing ||
         (_outlineCooldown?.isActive ?? false) ||
-        !(_pacer?.canSendImmediately ?? false))
+        !(_pacer?.canSendBackgroundImmediately ?? false))
       return false;
     try {
       clearTargetOutline();
@@ -1516,6 +1520,7 @@ class ObserverConnection extends ChangeNotifier {
     if (phase != ConnectionPhase.connected ||
         _worldRegistryProtocol != 1 ||
         _restoringRegistry ||
+        (canMove && !(_pacer?.canSendBackgroundImmediately ?? false)) ||
         !playerAttached ||
         offset < 0 ||
         (_registryCooldown?.isActive ?? false) ||
