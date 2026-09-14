@@ -66,6 +66,7 @@ public final class ObserverBrowserFixture implements ModInitializer {
                     .setValue(LeverBlock.FACE, AttachFace.WALL)
                     .setValue(LeverBlock.FACING, Direction.NORTH)
                     .setValue(LeverBlock.POWERED, false), 3);
+            write("placement-protection-result.json", ObserverPlacementProtectionProbe.verify(server, DIRT));
             var accounts = new ObserverAccountService(new ObserverAccountStore(results.resolve("accounts.properties")), true);
             bridge = new ObserverBridgeServer(accounts, new ObserverPlaySessionService(),
                     new ObserverPlayerAdmissionService(server));

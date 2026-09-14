@@ -64,7 +64,8 @@ validated; exact results and remaining validation evidence belong in its PR.
 
 The base `MinecraftServer.isUnderSpawnProtection` used by GameTest returns
 false in 26.2. These GameTests therefore do not prove dedicated-server spawn
-protection behavior. The driver calls the server's actual policy, and dedicated
-protection plus action-exception admission cleanup must be covered before a
-network capability invokes this driver. They are not waived by this internal
-groundwork or by green generic GameTests.
+protection behavior. The driver calls the server's actual policy.
+[Placement lifecycle validation](world-placement-lifecycle.md) adds a real
+DedicatedServer protection probe and post-mutation admission cleanup test;
+their actual passing evidence is required before a network capability invokes
+this driver. They are not waived by green generic GameTests.
