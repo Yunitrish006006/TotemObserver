@@ -123,7 +123,7 @@ fi
 
 (
   cd build/e2e/target
-  bash "$GITHUB_WORKSPACE/.github/scripts/run-glx-client.sh" "$java_bin" @"$target_args" \
+  TOTEM_GLX_DISPLAY=:99 bash "$GITHUB_WORKSPACE/.github/scripts/run-glx-client.sh" "$java_bin" @"$target_args" \
     -Dfabric.dli.config="$launch_cfg" \
     -Dfabric.dli.env=client \
     -Dfabric.dli.main=net.fabricmc.loader.impl.launch.knot.KnotClient \
@@ -141,7 +141,7 @@ target_pid=$!
 # Gradle/Loom preparation completed before the first client can join.
 (
   cd build/e2e/observer
-  bash "$GITHUB_WORKSPACE/.github/scripts/run-glx-client.sh" "$java_bin" @"$observer_args" \
+  TOTEM_GLX_DISPLAY=:100 bash "$GITHUB_WORKSPACE/.github/scripts/run-glx-client.sh" "$java_bin" @"$observer_args" \
     -Dfabric.dli.config="$launch_cfg" \
     -Dfabric.dli.env=client \
     -Dfabric.dli.main=net.fabricmc.loader.impl.launch.knot.KnotClient \
