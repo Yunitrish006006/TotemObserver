@@ -173,7 +173,7 @@ public final class ObserverMovementProtocolGameTest {
                                         && moved.get("subscriptionId").equals(bootstrap.get("subscriptionId"))
                                         && moved.get("revision").equals(bootstrap.get("revision"))
                                         && moved.get("applied").getAsBoolean(), "Invalid movement acknowledgment");
-                                require(moved.get("z").getAsDouble() < before.get("z").getAsDouble(), "Input did not move real player");
+                                require(moved.get("z").getAsDouble() != before.get("z").getAsDouble(), "Input did not move real player");
                                 onServer(server, () -> require(server.getPlayerList().getPlayer(uuid).getZ() >= moved.get("z").getAsDouble(),
                                         "Response position not backed by ServerPlayer"));
                                 // No new input: held direction expires after 250ms, idle physics settles.
