@@ -133,7 +133,7 @@ fi
     --sun-misc-unsafe-memory-access=allow \
     --enable-native-access=ALL-UNNAMED \
     -Dfile.encoding=UTF-8 \
-    net.fabricmc.devlaunchinjector.Main --username Target
+    net.fabricmc.devlaunchinjector.Main --username Target --graphicsBackend VULKAN
 ) > build/e2e/target.log 2>&1 &
 target_pid=$!
 
@@ -151,7 +151,7 @@ target_pid=$!
     --sun-misc-unsafe-memory-access=allow \
     --enable-native-access=ALL-UNNAMED \
     -Dfile.encoding=UTF-8 \
-    net.fabricmc.devlaunchinjector.Main --username Observer
+    net.fabricmc.devlaunchinjector.Main --username Observer --graphicsBackend VULKAN
 ) > build/e2e/observer.log 2>&1 &
 observer_pid=$!
 
