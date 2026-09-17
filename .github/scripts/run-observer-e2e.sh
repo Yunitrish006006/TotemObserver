@@ -123,7 +123,7 @@ fi
 
 (
   cd build/e2e/target
-  exec xvfb-run -a -s "-screen 0 1280x720x24 +extension GLX +render -noreset" "$java_bin" @"$target_args" \
+  exec xvfb-run -a -s "-screen 0 1280x720x24 +extension GLX +render +iglx -noreset" "$java_bin" @"$target_args" \
     -Dfabric.dli.config="$launch_cfg" \
     -Dfabric.dli.env=client \
     -Dfabric.dli.main=net.fabricmc.loader.impl.launch.knot.KnotClient \
@@ -133,7 +133,7 @@ fi
     --sun-misc-unsafe-memory-access=allow \
     --enable-native-access=ALL-UNNAMED \
     -Dfile.encoding=UTF-8 \
-    net.fabricmc.devlaunchinjector.Main --username Target --graphicsBackend VULKAN
+    net.fabricmc.devlaunchinjector.Main --username Target --graphicsBackend OPENGL
 ) > build/e2e/target.log 2>&1 &
 target_pid=$!
 
@@ -141,7 +141,7 @@ target_pid=$!
 # Gradle/Loom preparation completed before the first client can join.
 (
   cd build/e2e/observer
-  exec xvfb-run -a -s "-screen 0 1280x720x24 +extension GLX +render -noreset" "$java_bin" @"$observer_args" \
+  exec xvfb-run -a -s "-screen 0 1280x720x24 +extension GLX +render +iglx -noreset" "$java_bin" @"$observer_args" \
     -Dfabric.dli.config="$launch_cfg" \
     -Dfabric.dli.env=client \
     -Dfabric.dli.main=net.fabricmc.loader.impl.launch.knot.KnotClient \
@@ -151,7 +151,7 @@ target_pid=$!
     --sun-misc-unsafe-memory-access=allow \
     --enable-native-access=ALL-UNNAMED \
     -Dfile.encoding=UTF-8 \
-    net.fabricmc.devlaunchinjector.Main --username Observer --graphicsBackend VULKAN
+    net.fabricmc.devlaunchinjector.Main --username Observer --graphicsBackend OPENGL
 ) > build/e2e/observer.log 2>&1 &
 observer_pid=$!
 
