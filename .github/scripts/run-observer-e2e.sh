@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export SDL_VIDEO_DRIVER=x11
+export VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.json
+export VK_ICD_FILENAMES="$VK_DRIVER_FILES"
 if [[ -z "${TOTEM_CORE_JAR:-}" ]]; then
   core_version="$(sed -n 's/^mod_version=//p' .lockstep/TotemCore/gradle.properties)"
   TOTEM_CORE_JAR="${GITHUB_WORKSPACE}/.lockstep/TotemCore/build/libs/totem-core-${core_version}.jar"

@@ -112,6 +112,9 @@ jobs:
         run: |
           set -euo pipefail
           core_jar="${GITHUB_WORKSPACE}/.lockstep/TotemCore/build/libs/totem-core-0.7.23.jar"
+          export SDL_VIDEO_DRIVER=x11
+          export VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.json
+          export VK_ICD_FILENAMES="$VK_DRIVER_FILES"
           xvfb-run -a ./gradlew -PtotemCoreJar="$core_jar" runClientGametest --no-daemon --stacktrace
 
       - name: Run cross-module production sender Client GameTest
@@ -119,6 +122,9 @@ jobs:
         run: |
           set -euo pipefail
           core_jar="${GITHUB_WORKSPACE}/.lockstep/TotemCore/build/libs/totem-core-0.7.23.jar"
+          export SDL_VIDEO_DRIVER=x11
+          export VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.json
+          export VK_ICD_FILENAMES="$VK_DRIVER_FILES"
           xvfb-run -a ./gradlew \
             -PtotemCoreJar="$core_jar" \
             -PtotemRemnantJar="${GITHUB_WORKSPACE}/.lockstep/TotemRemnant/build/libs/totem-remnant-0.2.27.jar" \
