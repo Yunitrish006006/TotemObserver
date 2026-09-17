@@ -123,7 +123,7 @@ fi
 
 (
   cd build/e2e/target
-  exec xvfb-run -a "$java_bin" @"$target_args" \
+  exec xvfb-run -a -s "-screen 0 1280x720x24 +extension GLX +render -noreset" "$java_bin" @"$target_args" \
     -Dfabric.dli.config="$launch_cfg" \
     -Dfabric.dli.env=client \
     -Dfabric.dli.main=net.fabricmc.loader.impl.launch.knot.KnotClient \
@@ -141,7 +141,7 @@ target_pid=$!
 # Gradle/Loom preparation completed before the first client can join.
 (
   cd build/e2e/observer
-  exec xvfb-run -a "$java_bin" @"$observer_args" \
+  exec xvfb-run -a -s "-screen 0 1280x720x24 +extension GLX +render -noreset" "$java_bin" @"$observer_args" \
     -Dfabric.dli.config="$launch_cfg" \
     -Dfabric.dli.env=client \
     -Dfabric.dli.main=net.fabricmc.loader.impl.launch.knot.KnotClient \
