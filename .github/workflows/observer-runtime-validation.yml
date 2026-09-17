@@ -122,7 +122,7 @@ jobs:
           export SDL_VIDEO_DRIVER=x11
           export VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.json
           export VK_ICD_FILENAMES="$VK_DRIVER_FILES"
-          xvfb-run -a -s "-screen 0 1280x720x24 +extension GLX +render +iglx -noreset" ./gradlew -PtotemCoreJar="$core_jar" runClientGametest --no-daemon --stacktrace
+          bash .github/scripts/run-glx-client.sh ./gradlew -PtotemCoreJar="$core_jar" runClientGametest --no-daemon --stacktrace
 
       - name: Run cross-module production sender Client GameTest
         shell: bash
@@ -132,7 +132,7 @@ jobs:
           export SDL_VIDEO_DRIVER=x11
           export VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.json
           export VK_ICD_FILENAMES="$VK_DRIVER_FILES"
-          xvfb-run -a -s "-screen 0 1280x720x24 +extension GLX +render +iglx -noreset" ./gradlew \
+          bash .github/scripts/run-glx-client.sh ./gradlew \
             -PtotemCoreJar="$core_jar" \
             -PtotemRemnantJar="${GITHUB_WORKSPACE}/.lockstep/TotemRemnant/build/libs/totem-remnant-0.2.27.jar" \
             -PtotemAutomataJar="${GITHUB_WORKSPACE}/.lockstep/TotemAutomata/build/libs/totem-automata-0.1.28.jar" \
