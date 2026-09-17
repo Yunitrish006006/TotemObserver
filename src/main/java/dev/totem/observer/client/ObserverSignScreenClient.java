@@ -19,6 +19,7 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.SignBlockEntity;
 import net.minecraft.world.level.block.entity.HangingSignBlockEntity;
 import net.minecraft.world.level.block.entity.SignText;
+import net.minecraft.world.level.block.entity.SignTextSlot;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -85,7 +86,7 @@ public final class ObserverSignScreenClient {
         // production screen shape/style; private draft text never enters the
         // Observer transport.
         for (int i = 0; i < ObserverSignScreenPayloads.LINE_COUNT; i++) lines.add("");
-        SignText text = accessor.totem$getText();
+        SignText text = accessor.totem$getText().asImmutable();
         String color = text == null || text.getColor() == null ? "" : text.getColor().getName();
         boolean glowing = text != null && text.hasGlowingText();
         String variant = screen instanceof HangingSignEditScreen ? "hanging_sign" : "sign";
@@ -93,7 +94,7 @@ public final class ObserverSignScreenClient {
                 ObserverSignScreenPayloads.PROTOCOL_VERSION, sequence, true,
                 ObserverSignScreenPayloads.FAMILY_ID, screen.getClass().getName(),
                 screen.getTitle() == null ? "" : screen.getTitle().getString(), variant,
-                accessor.totem$isFrontText(), accessor.totem$getLine(), color, glowing, List.copyOf(lines));
+                accessor.totem$getSlot() == SignTextSlot.FRONT, accessor.totem$getLine(), color, glowing, List.copyOf(lines));
     }
 
     private static void closeTarget(boolean canSend) {
@@ -132,6 +133,10 @@ public final class ObserverSignScreenClient {
         boolean hanging = "hanging_sign".equals(remoteVariant);
         boolean correct = hanging ? minecraft.gui.screen() instanceof ObserverHangingSignScreen
                 : minecraft.gui.screen() instanceof ObserverSignScreen;
+        if (correct && minecraft.gui.screen() instanceof AbstractSignEditScreen current) {
+            correct = ((AbstractSignEditScreenAccessor) current).totem$getSlot()
+                    == (remoteFrontText ? SignTextSlot.FRONT : SignTextSlot.BACK);
+        }
         if (!correct) {
             suppressObserverScreenStop = true;
             try { minecraft.setScreenAndShow(createSignScreen(hanging)); }
@@ -171,13 +176,11 @@ public final class ObserverSignScreenClient {
                 : new ObserverSignScreen(sign, remoteFrontText);
     }
 
-    private static SignText signText() {
-        SignText text = new SignText().setColor(DyeColor.byName(remoteColor, DyeColor.BLACK))
-                .setHasGlowingText(remoteGlowing);
+    private static void applySignText(SignText.Mutable text) {
+        text.setColor(DyeColor.byName(remoteColor, DyeColor.BLACK)).setTextGlowing(remoteGlowing);
         for (int i = 0; i < ObserverSignScreenPayloads.LINE_COUNT; i++) {
-            text = text.setMessage(i, Component.literal(i < remoteLines.size() ? remoteLines.get(i) : ""));
+            text.setLine(i, Component.literal(i < remoteLines.size() ? remoteLines.get(i) : ""));
         }
-        return text;
     }
 
     private static void applySignState(AbstractSignEditScreen screen) {
@@ -185,12 +188,15 @@ public final class ObserverSignScreenClient {
         String[] messages = accessor.totem$getMessages();
         for (int i = 0; i < messages.length; i++) messages[i] = i < remoteLines.size() ? remoteLines.get(i) : "";
         accessor.totem$setLine(Math.clamp(remoteCurrentLine, 0, ObserverSignScreenPayloads.LINE_COUNT - 1));
-        accessor.totem$setText(signText());
+        applySignText(accessor.totem$getText());
+        SignText text = accessor.totem$getText().asImmutable();
+        accessor.totem$setTextColor(text.hasGlowingText() ? text.getColor().getTextColor()
+                : net.minecraft.client.renderer.blockentity.AbstractSignRenderer.getDarkColor(text));
     }
 
 
     private static final class ObserverSignScreen extends SignEditScreen implements ObserverReadOnlyScreen {
-        private ObserverSignScreen(SignBlockEntity sign, boolean front) { super(sign, front, false); }
+        private ObserverSignScreen(SignBlockEntity sign, boolean front) { super(sign, front ? SignTextSlot.FRONT : SignTextSlot.BACK, false); }
         @Override public boolean totem$isObserverReadOnly() { return true; }
         @Override public void tick() { }
         @Override public void onClose() { if (!suppressObserverScreenStop) ObserverVanillaScreenSupport.stopObserving(); }
@@ -204,7 +210,7 @@ public final class ObserverSignScreenClient {
     }
 
     private static final class ObserverHangingSignScreen extends HangingSignEditScreen implements ObserverReadOnlyScreen {
-        private ObserverHangingSignScreen(SignBlockEntity sign, boolean front) { super(sign, front, false); }
+        private ObserverHangingSignScreen(SignBlockEntity sign, boolean front) { super(sign, front ? SignTextSlot.FRONT : SignTextSlot.BACK, false); }
         @Override public boolean totem$isObserverReadOnly() { return true; }
         @Override public void tick() { }
         @Override public void onClose() { if (!suppressObserverScreenStop) ObserverVanillaScreenSupport.stopObserving(); }

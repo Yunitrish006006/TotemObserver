@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'outbound_frame_pacer.dart';
+
 import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
@@ -105,11 +107,21 @@ class ObserverConnection extends ChangeNotifier {
     : _open = open ?? SocketTransport.new;
   final BridgeTransport Function(Uri) _open;
   BridgeTransport? _transport;
+  OutboundFramePacer? _pacer;
   StreamSubscription<dynamic>? _subscription;
   Timer? _deadline, _heartbeat, _responseDeadline;
   Timer? _movementDeadline, _movementCooldown, _registryDeadline;
-  Timer? _sectionCooldown, _registryCooldown;
-  bool get canSendWorldSectionNow => !(_sectionCooldown?.isActive ?? false);
+  Timer? _sectionCooldown,
+      _registryCooldown,
+      _sectionDeadline,
+      _bootstrapDeadline;
+  bool _worldWindowRefreshNeeded = false;
+  bool get worldWindowRefreshing =>
+      _worldWindowRefreshNeeded || _pendingWorldBootstrapSequence >= 0;
+  bool get canSendWorldSectionNow =>
+      !(_sectionCooldown?.isActive ?? false) &&
+      !worldWindowRefreshing &&
+      _pendingWorldSection == null;
   int _worldMovementProtocol = 0, _pendingMovementSequence = -1;
   int _lastMovementServerTick = -1, _worldGeometryRevision = 0;
   int get worldGeometryRevision => _worldGeometryRevision;
@@ -161,6 +173,44 @@ class ObserverConnection extends ChangeNotifier {
   final Map<int, String> _blockStateNames = {};
   final Map<WorldSectionKey, WorldSectionSnapshot> _worldSections = {};
   final Set<WorldSectionKey> _unavailableWorldSections = {};
+  Set<WorldSectionKey>? _wantedWorldSections;
+  static const maxCachedWorldSections = 43;
+  int get cachedWorldEntryCount =>
+      _worldSections.length + _unavailableWorldSections.length;
+
+  void retainWorldSections(Set<WorldSectionKey> keys) {
+    if (keys.length > maxCachedWorldSections ||
+        keys.any(
+          (key) =>
+              key.subscriptionId != bootstrapSubscriptionId ||
+              key.revision != bootstrapRevision,
+        )) {
+      throw ArgumentError('Current bounded world keys required');
+    }
+    _wantedWorldSections = Set.unmodifiable(keys);
+    final before = cachedWorldEntryCount;
+    _worldSections.removeWhere((key, _) => !keys.contains(key));
+    _unavailableWorldSections.removeWhere((key) => !keys.contains(key));
+    if (cachedWorldEntryCount != before) {
+      _worldGeometryRevision++;
+      _notify();
+    }
+  }
+
+  void _boundWorldCache() {
+    while (cachedWorldEntryCount > maxCachedWorldSections) {
+      if (_unavailableWorldSections.isNotEmpty) {
+        _unavailableWorldSections.remove(_unavailableWorldSections.first);
+      } else {
+        _worldSections.remove(_worldSections.keys.first);
+      }
+    }
+  }
+
+  void _tryRefreshWorldWindow() {
+    if (_worldWindowRefreshNeeded) _requestWorldBootstrap();
+  }
+
   int replies = 0;
 
   bool get hasWorldState => worldDimension.isNotEmpty;
@@ -170,6 +220,23 @@ class ObserverConnection extends ChangeNotifier {
       registryFingerprint.isNotEmpty && registryTotal > 0;
   bool get canRequestWorldSections =>
       _worldSectionProtocol == 1 && hasWorldBootstrap && hasWorldRegistry;
+  bool get worldRegistryPending => _pendingWorldRegistrySequence >= 0;
+  static const maxCachedBlockStates = 4096;
+  int get cachedBlockStateCount => _blockStateNames.length;
+
+  void retainBlockStatePages(Set<int> offsets) {
+    if (offsets.length > 256 ||
+        offsets.any((offset) => offset < 0 || offset % 8 != 0)) {
+      throw ArgumentError('Bounded registry pages required');
+    }
+    final before = _blockStateNames.length;
+    _blockStateNames.removeWhere((id, _) => !offsets.contains((id ~/ 8) * 8));
+    if (_blockStateNames.length != before) {
+      _worldGeometryRevision++;
+      _notify();
+    }
+  }
+
   String? blockStateName(int rawId) => _blockStateNames[rawId];
 
   WorldSectionSnapshot? worldSection(int chunkX, int chunkZ, int sectionY) {
@@ -238,6 +305,10 @@ class ObserverConnection extends ChangeNotifier {
     try {
       final transport = _open(uri);
       _transport = transport;
+      _pacer = OutboundFramePacer(
+        write: transport.send,
+        onError: () => _fail('連線已中斷'),
+      );
       _subscription = transport.messages.listen(
         (data) {
           if (generation == _generation) _receive(data);
@@ -329,7 +400,7 @@ class ObserverConnection extends ChangeNotifier {
           _worldRegistryProtocol = worldRegistryProtocol == 1 ? 1 : 0;
           _worldSectionProtocol = worldSectionProtocol == 1 ? 1 : 0;
           _hello = true;
-          _transport!.send(_login!);
+          _pacer!.send(_login!);
           _login = null;
         case 'authenticated':
           if (!_hello ||
@@ -446,6 +517,11 @@ class ObserverConnection extends ChangeNotifier {
           worldZ = z.toDouble();
           worldYaw = yaw.toDouble();
           worldPitch = pitch.toDouble();
+          if ((worldX / 16).floor() != bootstrapCenterChunkX ||
+              (worldZ / 16).floor() != bootstrapCenterChunkZ) {
+            _worldWindowRefreshNeeded = true;
+          }
+          _tryRefreshWorldWindow();
           _notify();
         case 'world_state':
           final seq = message['seq'];
@@ -542,7 +618,10 @@ class ObserverConnection extends ChangeNotifier {
               revision != 1) {
             throw const FormatException();
           }
+          _bootstrapDeadline?.cancel();
           _pendingWorldBootstrapSequence = -1;
+          _worldWindowRefreshNeeded = false;
+          _wantedWorldSections = null;
           _pendingWorldSection = null;
           _worldGeometryRevision++;
           _worldSections.clear();
@@ -581,7 +660,8 @@ class ObserverConnection extends ChangeNotifier {
               states is! List ||
               states.isEmpty ||
               states.length > 8 ||
-              offset + states.length > total) {
+              offset + states.length > total ||
+              states.length != (total - offset < 8 ? total - offset : 8)) {
             throw const FormatException();
           }
           final statePattern = RegExp(
@@ -607,6 +687,11 @@ class ObserverConnection extends ChangeNotifier {
           _pendingWorldRegistrySequence = -1;
           _pendingWorldRegistryOffset = -1;
           _worldGeometryRevision++;
+          while (_blockStateNames.length + states.length >
+              maxCachedBlockStates) {
+            final oldestPage = (_blockStateNames.keys.first ~/ 8) * 8;
+            _blockStateNames.removeWhere((id, _) => id ~/ 8 == oldestPage ~/ 8);
+          }
           for (int i = 0; i < states.length; i++) {
             _blockStateNames[offset + i] = states[i] as String;
           }
@@ -667,8 +752,13 @@ class ObserverConnection extends ChangeNotifier {
             );
             _unavailableWorldSections.remove(pending.key);
             _worldGeometryRevision++;
-            _worldSections[pending.key] = snapshot;
+            if (_wantedWorldSections?.contains(pending.key) ?? true) {
+              _worldSections[pending.key] = snapshot;
+              _boundWorldCache();
+            }
+            _sectionDeadline?.cancel();
             _pendingWorldSection = null;
+            _tryRefreshWorldWindow();
             _notify();
           }
         case 'world_section_unavailable':
@@ -709,7 +799,12 @@ class ObserverConnection extends ChangeNotifier {
           _pendingWorldSection = null;
           _worldGeometryRevision++;
           _worldSections.remove(pending.key);
-          _unavailableWorldSections.add(pending.key);
+          if (_wantedWorldSections?.contains(pending.key) ?? true) {
+            _unavailableWorldSections.add(pending.key);
+            _boundWorldCache();
+          }
+          _sectionDeadline?.cancel();
+          _tryRefreshWorldWindow();
           _notify();
         case 'pong':
           final seq = message['seq'];
@@ -744,6 +839,8 @@ class ObserverConnection extends ChangeNotifier {
     required bool jump,
   }) {
     if (!canMove ||
+        _worldWindowRefreshNeeded ||
+        !(_pacer?.canSendImmediately ?? false) ||
         movementPending ||
         _pendingWorldBootstrapSequence >= 0 ||
         (_movementCooldown?.isActive ?? false))
@@ -764,7 +861,7 @@ class ObserverConnection extends ChangeNotifier {
         const Duration(seconds: 5),
         () => _fail('移動回應逾時，連線已結束'),
       );
-      _transport!.send(
+      _pacer!.send(
         jsonEncode({
           'type': 'world_movement',
           'protocol': 1,
@@ -797,7 +894,7 @@ class ObserverConnection extends ChangeNotifier {
     try {
       final seq = _sequence++;
       _pendingWorldStateSequence = seq;
-      _transport?.send(jsonEncode({'type': 'world_state', 'seq': seq}));
+      _pacer?.send(jsonEncode({'type': 'world_state', 'seq': seq}));
     } catch (_) {
       _fail('連線已中斷');
     }
@@ -815,7 +912,11 @@ class ObserverConnection extends ChangeNotifier {
     try {
       final seq = _sequence++;
       _pendingWorldBootstrapSequence = seq;
-      _transport?.send(jsonEncode({'type': 'world_bootstrap', 'seq': seq}));
+      _bootstrapDeadline = Timer(
+        const Duration(seconds: 5),
+        () => _fail('世界視窗回應逾時，連線已結束'),
+      );
+      _pacer?.send(jsonEncode({'type': 'world_bootstrap', 'seq': seq}));
     } catch (_) {
       _fail('連線已中斷');
     }
@@ -841,7 +942,7 @@ class ObserverConnection extends ChangeNotifier {
         const Duration(seconds: 5),
         () => _fail('方塊資料回應逾時，連線已結束'),
       );
-      _transport?.send(
+      _pacer?.send(
         jsonEncode({'type': 'world_registry', 'seq': seq, 'offset': offset}),
       );
     } catch (_) {
@@ -893,13 +994,17 @@ class ObserverConnection extends ChangeNotifier {
       if (_worldMovementProtocol == 1) {
         _sectionCooldown = Timer(const Duration(milliseconds: 300), _notify);
       }
+      _sectionDeadline = Timer(
+        const Duration(seconds: 5),
+        () => _fail('區塊回應逾時，連線已結束'),
+      );
       _pendingWorldSection = _WorldSectionAssembly(
         sequence: seq,
         key: key,
         dimension: bootstrapDimension,
         registryFingerprint: registryFingerprint,
       );
-      _transport?.send(
+      _pacer?.send(
         jsonEncode({
           'type': 'world_section',
           'seq': seq,
@@ -920,7 +1025,7 @@ class ObserverConnection extends ChangeNotifier {
   void ping() {
     if (phase != ConnectionPhase.connected) return;
     try {
-      _transport?.send(jsonEncode({'type': 'ping', 'seq': _sequence++}));
+      _pacer?.send(jsonEncode({'type': 'ping', 'seq': _sequence++}));
     } catch (_) {
       _fail('連線已中斷');
     }
@@ -982,13 +1087,17 @@ class ObserverConnection extends ChangeNotifier {
   void disconnect() {
     if (phase == ConnectionPhase.connected) {
       try {
-        _transport?.send('{"type":"logout"}');
+        _pacer?.send('{"type":"logout"}');
       } catch (_) {}
     }
     _generation++;
     _worldGeometryRevision++;
     _movementDeadline?.cancel();
     _registryDeadline?.cancel();
+    _sectionDeadline?.cancel();
+    _bootstrapDeadline?.cancel();
+    _worldWindowRefreshNeeded = false;
+    _wantedWorldSections = null;
     _registryCooldown?.cancel();
     _sectionCooldown?.cancel();
     _movementCooldown?.cancel();
@@ -1002,6 +1111,8 @@ class ObserverConnection extends ChangeNotifier {
     _responseDeadline?.cancel();
     unawaited(_subscription?.cancel());
     _subscription = null;
+    _pacer?.close();
+    _pacer = null;
     _transport?.close();
     _transport = null;
     _login = null;

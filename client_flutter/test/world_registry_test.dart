@@ -121,6 +121,57 @@ void main() {
     },
   );
 
+  testWidgets(
+    'registry cache is bounded and visible retention evicts old pages',
+    (tester) async {
+      final (connection, socket) = await connectRegistry();
+      socket.receive({...registryPage(seq: 0, offset: 0), 'total': 8000});
+      socket.receive({'type': 'pong', 'seq': 1});
+      int lastPing = 1;
+      for (int page = 1; page <= 513; page++) {
+        await tester.pump(const Duration(milliseconds: 100));
+        connection.requestBlockState(page * 8);
+        final request = jsonDecode(socket.sent.last) as Map<String, dynamic>;
+        expect(request['type'], 'world_registry');
+        socket.receive({
+          ...registryPage(seq: request['seq'] as int, offset: page * 8),
+          'total': 8000,
+        });
+        // Heartbeats remain independently acknowledged while registry hydration runs.
+        for (final frame
+            in socket.sent.map(jsonDecode).where((v) => v['type'] == 'ping')) {
+          final seq = frame['seq'] as int;
+          if (seq > lastPing) {
+            socket.receive({'type': 'pong', 'seq': seq});
+            lastPing = seq;
+          }
+        }
+        expect(connection.cachedBlockStateCount, lessThanOrEqualTo(4096));
+      }
+      expect(connection.blockStateName(0), isNull);
+      connection.retainBlockStatePages({513 * 8});
+      expect(connection.cachedBlockStateCount, 8);
+      expect(connection.blockStateName(513 * 8), isNotNull);
+      connection.dispose();
+    },
+  );
+
+  testWidgets('short registry pages and missing responses fail closed', (
+    tester,
+  ) async {
+    final (short, socket) = await connectRegistry();
+    socket.receive({
+      ...registryPage(seq: 0, offset: 0),
+      'states': ['minecraft:air'],
+    });
+    expect(short.phase, ConnectionPhase.offline);
+    short.dispose();
+    final (timeout, _) = await connectRegistry();
+    await tester.pump(const Duration(seconds: 5));
+    expect(timeout.phase, ConnectionPhase.offline);
+    timeout.dispose();
+  });
+
   test('rejects registry pages from a different fingerprint', () async {
     final (connection, socket) = await connectRegistry();
     socket.receive(registryPage(seq: 0, offset: 0));

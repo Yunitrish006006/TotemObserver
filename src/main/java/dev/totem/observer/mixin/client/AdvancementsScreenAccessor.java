@@ -11,4 +11,6 @@ import org.spongepowered.asm.mixin.gen.Accessor;
 public interface AdvancementsScreenAccessor {
     @Accessor("selectedTab") AdvancementTab totem$getSelectedTab();
     @Accessor("advancements") ClientAdvancements totem$getAdvancements();
+    @Accessor("leftPos") int totem$getLeftPos();
+    @Accessor("topPos") int totem$getTopPos();
 }

@@ -26,7 +26,7 @@ cannot survive a world-state boundary. Rendering owns no requests.
 
 Keyboard/mouse focus and pointer capture are implemented by the separate
 [first-person input owner](world-first-person-input.md). Moving chunk-window
-replanning remains a separate slice. This transport alone is not a playable client.
+replanning is owned by the [window lifecycle](world-moving-window.md). This transport alone is not a playable client.
 
 Validation includes malformed/stale correction rejection, single pending and
 cooldown behavior, authoritative position ownership, legacy capability fallback,

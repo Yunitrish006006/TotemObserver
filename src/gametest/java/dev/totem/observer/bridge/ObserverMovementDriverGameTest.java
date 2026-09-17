@@ -86,7 +86,7 @@ public final class ObserverMovementDriverGameTest {
             player.snapTo(origin.getX() + 1.5, startY + 6, origin.getZ() + 0.5, 0, 0);
             player.setDeltaMovement(Vec3.ZERO);
             player.setOnGround(false);
-            player.invulnerableTime = 0;
+            player.setInvulnerableTime(0);
             player.setHealth(player.getMaxHealth());
             require(player.connection.hasClientLoaded(), "Fixture must finish player load before fall");
           } catch (Throwable failure) {

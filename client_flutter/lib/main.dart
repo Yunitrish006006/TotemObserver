@@ -4,6 +4,7 @@ import 'connection.dart';
 import 'world_debug_scene.dart';
 import 'world_section_scheduler.dart';
 import 'world_visible_view.dart';
+import 'world_registry_hydrator.dart';
 import 'world_movement_controls.dart';
 
 void main() => runApp(const ObserverApp());
@@ -58,6 +59,7 @@ class _ConnectionPageState extends State<ConnectionPage> {
       widget.connection ?? ObserverConnection();
   late final WorldSectionScheduler sectionScheduler;
   late final WorldVisibleViewController visibleWorld;
+  late final WorldRegistryHydrator registryHydrator;
   final address = TextEditingController(
     text: 'ws://127.0.0.1:25580/observer/bridge',
   );
@@ -69,10 +71,12 @@ class _ConnectionPageState extends State<ConnectionPage> {
     super.initState();
     sectionScheduler = WorldSectionScheduler(connection);
     visibleWorld = WorldVisibleViewController(connection, sectionScheduler);
+    registryHydrator = WorldRegistryHydrator(connection, visibleWorld);
   }
 
   @override
   void dispose() {
+    registryHydrator.dispose();
     visibleWorld.dispose();
     sectionScheduler.dispose();
     address.dispose();

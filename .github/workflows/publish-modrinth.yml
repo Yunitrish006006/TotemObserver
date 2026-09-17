@@ -26,7 +26,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  CORE_REF: f87cd10fe8aefce77925b9e75dad237f17f38966
+  CORE_REF: 424b90dc3929caa8c1afcfca7e63c50a64bde669
 
 jobs:
   publish:
@@ -63,8 +63,8 @@ jobs:
         run: |
           set -euo pipefail
           (cd .lockstep/TotemCore && ./gradlew assemble --no-daemon --stacktrace)
-          test "$(sed -n 's/^mod_version=//p' .lockstep/TotemCore/gradle.properties)" = 0.7.18
-          ./gradlew -PtotemCoreJar="$GITHUB_WORKSPACE/.lockstep/TotemCore/build/libs/totem-core-0.7.18.jar" clean test assemble --no-daemon --stacktrace
+          test "$(sed -n 's/^mod_version=//p' .lockstep/TotemCore/gradle.properties)" = 0.7.23
+          ./gradlew -PtotemCoreJar="$GITHUB_WORKSPACE/.lockstep/TotemCore/build/libs/totem-core-0.7.23.jar" clean test assemble --no-daemon --stacktrace
       - name: Require all Observer gates for this commit
         if: github.event_name == 'workflow_dispatch' && inputs.dry_run == false
         shell: bash

@@ -6,11 +6,11 @@ if [[ -z "${TOTEM_CORE_JAR:-}" ]]; then
 fi
 integration_args=(
   "-PtotemCoreJar=$TOTEM_CORE_JAR"
-  "-PtotemRemnantJar=${TOTEM_REMNANT_JAR:-${GITHUB_WORKSPACE}/.lockstep/TotemRemnant/build/libs/totem-remnant-0.2.21.jar}"
-  "-PtotemAutomataJar=${TOTEM_AUTOMATA_JAR:-${GITHUB_WORKSPACE}/.lockstep/TotemAutomata/build/libs/totem-automata-0.1.24.jar}"
-  "-PtotemNexusJar=${TOTEM_NEXUS_JAR:-${GITHUB_WORKSPACE}/.lockstep/TotemNexus/build/libs/totem-nexus-0.3.23.jar}"
-  "-PtotemVillagersJar=${TOTEM_VILLAGERS_JAR:-${GITHUB_WORKSPACE}/.lockstep/TotemVillagers/build/libs/totem-villagers-0.1.36.jar}"
-  "-PtotemLocksmithJar=${TOTEM_LOCKSMITH_JAR:-${GITHUB_WORKSPACE}/.lockstep/TotemLocksmith/build/libs/totem-locksmith-0.1.10.jar}"
+  "-PtotemRemnantJar=${TOTEM_REMNANT_JAR:-${GITHUB_WORKSPACE}/.lockstep/TotemRemnant/build/libs/totem-remnant-0.2.26.jar}"
+  "-PtotemAutomataJar=${TOTEM_AUTOMATA_JAR:-${GITHUB_WORKSPACE}/.lockstep/TotemAutomata/build/libs/totem-automata-0.1.27.jar}"
+  "-PtotemNexusJar=${TOTEM_NEXUS_JAR:-${GITHUB_WORKSPACE}/.lockstep/TotemNexus/build/libs/totem-nexus-0.3.24.jar}"
+  "-PtotemVillagersJar=${TOTEM_VILLAGERS_JAR:-${GITHUB_WORKSPACE}/.lockstep/TotemVillagers/build/libs/totem-villagers-0.1.38.jar}"
+  "-PtotemLocksmithJar=${TOTEM_LOCKSMITH_JAR:-${GITHUB_WORKSPACE}/.lockstep/TotemLocksmith/build/libs/totem-locksmith-0.1.12.jar}"
 )
 if [[ -n "${TOTEM_GRADLE_INIT_SCRIPT:-}" ]]; then
   integration_args+=(--init-script "$TOTEM_GRADLE_INIT_SCRIPT")
