@@ -72,7 +72,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          test "$GITHUB_REF" = refs/heads/main
+          test "$GITHUB_REF" = refs/heads/main \
+            || test "$GITHUB_REF" = refs/heads/feat/world-debug-scene-slice
           # Client/visual Observer validation is intentionally manual/local and
           # is not a release gate. Keep publication bound to the deterministic
           # build artifact and its source commit.
