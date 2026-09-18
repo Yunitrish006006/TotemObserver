@@ -23,7 +23,7 @@ public final class ObserverAnvilClientGameTest implements FabricClientGameTest {
     public void runTest(ClientGameTestContext context) {
         try (TestSingleplayerContext singleplayer = context.worldBuilder().create()) {
             context.waitTicks(2);
-            singleplayer.getClientLevel().waitForChunksRender();
+            singleplayer.getConnection().waitForChunksRender();
 
             UUID targetId = UUID.randomUUID();
             ObserverAnvilScreenPayloads.AnvilRelay open = new ObserverAnvilScreenPayloads.AnvilRelay(

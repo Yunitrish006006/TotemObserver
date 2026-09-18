@@ -64,6 +64,7 @@ public final class ObserverAdvancementsScreenClient {
     private static boolean suppressObserverScreenStop;
     private static long extractedFrames;
     private static ClientAdvancements remoteAdvancements;
+    private static boolean remoteAdvancementsDirty;
 
     private ObserverAdvancementsScreenClient() {}
 
@@ -125,12 +126,12 @@ public final class ObserverAdvancementsScreenClient {
     private static ObserverAdvancementsScreenPayloads.AdvancementsState captureTargetState(
             Minecraft minecraft, AdvancementsScreen screen, long sequence) {
         ClientAdvancements manager = minecraft.getConnection().getAdvancements();
-        AdvancementTree tree = manager.getTree();
+        AdvancementTree tree = manager.tree();
         Map<AdvancementHolder, AdvancementProgress> progress =
                 ((ClientAdvancementsAccessor) (Object) manager).totem$getProgress();
 
         AdvancementTab selectedTab = ((AdvancementsScreenAccessor) (Object) screen).totem$getSelectedTab();
-        String selectedRootId = selectedTab == null ? "" : selectedTab.getRootNode().holder().id().toString();
+        String selectedRootId = selectedTab == null ? "" : selectedTab.getRootAdvancement().id().toString();
         double scrollX = selectedTab == null ? 0.0D : ((AdvancementTabAccessor) (Object) selectedTab).totem$getScrollX();
         double scrollY = selectedTab == null ? 0.0D : ((AdvancementTabAccessor) (Object) selectedTab).totem$getScrollY();
 
@@ -153,8 +154,8 @@ public final class ObserverAdvancementsScreenClient {
             if (display.isEmpty()) continue;
             DisplayInfo info = display.get();
             result.add(new ObserverAdvancementsScreenPayloads.TabState(
-                    root.holder().id().toString(), info.getTitle().getString(), itemId(info.getIcon()),
-                    info.getBackground().map(ClientAsset.ResourceTexture::id).map(Identifier::toString).orElse("")));
+                    root.holder().id().toString(), info.title().getString(), itemId(info.icon()),
+                    info.background().map(ClientAsset.ResourceTexture::id).map(Identifier::toString).orElse("")));
         }
         result.sort(Comparator.comparing(ObserverAdvancementsScreenPayloads.TabState::rootId));
         return List.copyOf(result);
@@ -177,8 +178,8 @@ public final class ObserverAdvancementsScreenClient {
             result.add(new ObserverAdvancementsScreenPayloads.NodeState(
                     node.holder().id().toString(), selectedRootId,
                     visibleParent == null ? "" : visibleParent.holder().id().toString(),
-                    info.getTitle().getString(), info.getDescription().getString(), itemId(info.getIcon()),
-                    info.getType().getSerializedName(), info.getX(), info.getY(), percent, done, info.isHidden()));
+                    info.title().getString(), info.description().getString(), itemId(info.icon()),
+                    info.type().getSerializedName(), node.x(), node.y(), percent, done, info.hidden()));
         }
         return List.copyOf(result);
     }
@@ -210,6 +211,8 @@ public final class ObserverAdvancementsScreenClient {
         remoteSelectedRootId = p.selectedRootId();
         remoteScrollX = p.scrollX();
         remoteScrollY = p.scrollY();
+        remoteAdvancementsDirty |= remoteAdvancements == null
+                || !remoteTabs.equals(p.tabs()) || !remoteNodes.equals(p.nodes());
         remoteTabs = List.copyOf(p.tabs());
         remoteNodes = List.copyOf(p.nodes());
         ensureObserverScreen();
@@ -223,7 +226,12 @@ public final class ObserverAdvancementsScreenClient {
                     TelemetryEventSender.DISABLED, false, Duration.ZERO,
                     "totem-observer", UUID.randomUUID()));
         }
-        applyRemoteAdvancements();
+        if (remoteAdvancementsDirty) {
+            applyRemoteAdvancements();
+            remoteAdvancementsDirty = false;
+        }
+        identifier(remoteSelectedRootId).map(remoteAdvancements::get)
+                .ifPresent(holder -> remoteAdvancements.setSelectedTab(holder, false));
         if (!(minecraft.gui.screen() instanceof ObserverAdvancementsScreen)) {
             suppressObserverScreenStop = true;
             try { minecraft.setScreenAndShow(new ObserverAdvancementsScreen(remoteAdvancements)); }
@@ -249,12 +257,18 @@ public final class ObserverAdvancementsScreenClient {
         remoteTabs = List.of();
         remoteNodes = List.of();
         remoteAdvancements = null;
+        remoteAdvancementsDirty = false;
     }
 
     private static void applyRemoteAdvancements() {
         LinkedHashMap<Identifier, ObserverAdvancementsScreenPayloads.NodeState> nodesById = new LinkedHashMap<>();
+        Map<Identifier, ObserverAdvancementsScreenPayloads.NodeState> positions = new HashMap<>();
         for (ObserverAdvancementsScreenPayloads.NodeState node : remoteNodes) {
-            try { nodesById.put(Identifier.parse(node.id()), node); }
+            try {
+                Identifier id = Identifier.parse(node.id());
+                nodesById.put(id, node);
+                positions.put(id, node);
+            }
             catch (RuntimeException ignored) { }
         }
 
@@ -292,7 +306,11 @@ public final class ObserverAdvancementsScreenClient {
         }
 
         remoteAdvancements.update(new ClientboundUpdateAdvancementsPacket(
-                true, holders.values(), Set.of(), progress, false));
+                true, holders.values().stream().map(holder -> {
+                    ObserverAdvancementsScreenPayloads.NodeState node = positions.get(holder.id());
+                    return new ClientboundUpdateAdvancementsPacket.PositionedAdvancement(
+                            holder, node == null ? 0 : node.x(), node == null ? 0 : node.y());
+                }).toList(), Set.of(), progress, false));
         identifier(remoteSelectedRootId).map(remoteAdvancements::get)
                 .ifPresent(holder -> remoteAdvancements.setSelectedTab(holder, false));
     }
@@ -313,7 +331,6 @@ public final class ObserverAdvancementsScreenClient {
                 Component.literal(node == null ? fallbackTitle : node.title()),
                 Component.literal(node == null ? "" : node.description()),
                 background, type, false, false, node != null && node.hidden());
-        if (node != null) display.setLocation(node.x(), node.y());
         Advancement advancement = new Advancement(
                 parent,
                 Optional.of(display),
@@ -365,6 +382,7 @@ public final class ObserverAdvancementsScreenClient {
         AdvancementTabAccessor accessor = (AdvancementTabAccessor) (Object) selected;
         accessor.totem$setScrollX(remoteScrollX);
         accessor.totem$setScrollY(remoteScrollY);
+        accessor.totem$setCentered(true);
     }
 
     private static ItemStack itemStack(String itemId) {
@@ -381,6 +399,14 @@ public final class ObserverAdvancementsScreenClient {
         private ObserverAdvancementsScreen(ClientAdvancements advancements) { super(advancements); }
         @Override public boolean totem$isObserverReadOnly() { return true; }
         @Override public boolean isPauseScreen() { return false; }
+        @Override public void tick() {
+            AdvancementsScreenAccessor accessor = (AdvancementsScreenAccessor) (Object) this;
+            AdvancementTab selected = accessor.totem$getSelectedTab();
+            if (selected != null) {
+                selected.tick(ObserverOwnedScreenCoordinator.renderMouseX(-10000) - accessor.totem$getLeftPos() - 9,
+                        ObserverOwnedScreenCoordinator.renderMouseY(-10000) - accessor.totem$getTopPos() - 18);
+            }
+        }
         @Override public void onClose() {
             if (!suppressObserverScreenStop) ObserverVanillaScreenSupport.stopObserving();
         }

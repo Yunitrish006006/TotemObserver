@@ -22,7 +22,7 @@ public final class ObserverSignClientGameTest implements FabricClientGameTest {
     public void runTest(ClientGameTestContext context) {
         try (TestSingleplayerContext singleplayer = context.worldBuilder().create()) {
             context.waitTicks(2);
-            singleplayer.getClientLevel().waitForChunksRender();
+            singleplayer.getConnection().waitForChunksRender();
             UUID targetId = UUID.randomUUID();
             context.runOnClient(minecraft -> {
                 applySession(true, targetId, ObserverSignScreenPayloads.CAPABILITY);
@@ -31,6 +31,7 @@ public final class ObserverSignClientGameTest implements FabricClientGameTest {
             context.waitFor(minecraft -> minecraft.gui.screen() != null
                     && minecraft.gui.screen().getClass().getName().contains("ObserverHangingSignScreen"), 100);
             context.waitFor(minecraft -> getLong("extractedFrames") > 0L, 100);
+            context.runOnClient(minecraft -> assertProductionSign(minecraft, false, "black", true, 2));
             if (!"hanging_sign".equals(getString("remoteVariant")) || getBoolean("remoteFrontText")
                     || getInt("remoteCurrentLine") != 2 || !"black".equals(getString("remoteColor"))
                     || !getBoolean("remoteGlowing") || getListSize("remoteLines") != 4) {
@@ -39,7 +40,19 @@ public final class ObserverSignClientGameTest implements FabricClientGameTest {
             persistForCi(context.takeScreenshot("observer-ui-native-sign-screen"),
                     "observer-ui-native-sign-screen.png");
             context.runOnClient(minecraft -> {
-                accept(ObserverSignScreenPayloads.relay(targetId, ObserverSignScreenPayloads.closed(2L)));
+                accept(ObserverSignScreenPayloads.relay(targetId, new ObserverSignScreenPayloads.SignState(
+                        ObserverSignScreenPayloads.PROTOCOL_VERSION, 2L, true,
+                        ObserverSignScreenPayloads.FAMILY_ID, ObserverSignScreenPayloads.HANGING_SIGN_SCREEN_CLASS,
+                        "Edit Hanging Sign", "hanging_sign", false, 1, "red", false,
+                        List.of("", "", "", ""))));
+                assertProductionSign(minecraft, false, "red", false, 1);
+                accept(ObserverSignScreenPayloads.relay(targetId, new ObserverSignScreenPayloads.SignState(
+                        ObserverSignScreenPayloads.PROTOCOL_VERSION, 3L, true,
+                        ObserverSignScreenPayloads.FAMILY_ID, net.minecraft.client.gui.screens.inventory.SignEditScreen.class.getName(),
+                        "Edit Sign", "sign", true, 0, "blue", true,
+                        List.of("", "", "", ""))));
+                assertProductionSign(minecraft, true, "blue", true, 0);
+                accept(ObserverSignScreenPayloads.relay(targetId, ObserverSignScreenPayloads.closed(4L)));
                 applySession(false, new UUID(0L, 0L), 0L);
             });
             context.waitForScreen(null);
@@ -55,6 +68,24 @@ public final class ObserverSignClientGameTest implements FabricClientGameTest {
                 ObserverSignScreenPayloads.FAMILY_ID, ObserverSignScreenPayloads.HANGING_SIGN_SCREEN_CLASS,
                 "Edit Hanging Sign", "hanging_sign", false, 2, "black", true,
                 List.of("Observer", "semantic", "sign editing", "works"));
+    }
+
+    private static void assertProductionSign(net.minecraft.client.Minecraft minecraft, boolean front,
+                                             String color, boolean glowing, int line) {
+        var accessor = (dev.totem.observer.mixin.client.AbstractSignEditScreenAccessor) minecraft.gui.screen();
+        var text = accessor.totem$getText().asImmutable();
+        var expectedColor = net.minecraft.world.item.DyeColor.byName(color, net.minecraft.world.item.DyeColor.BLACK);
+        int renderedColor = glowing ? expectedColor.getTextColor()
+                : net.minecraft.client.renderer.blockentity.AbstractSignRenderer.getDarkColor(text);
+        if (text.getColor() != expectedColor || text.hasGlowingText() != glowing
+                || accessor.totem$getTextColor() != renderedColor || accessor.totem$getLine() != line
+                || accessor.totem$getSlot() != (front ? net.minecraft.world.level.block.entity.SignTextSlot.FRONT
+                : net.minecraft.world.level.block.entity.SignTextSlot.BACK)) {
+            throw new AssertionError("Production sign style, side or current line differs from relay");
+        }
+        if (!color.equals("black") && java.util.Arrays.stream(accessor.totem$getMessages()).anyMatch(value -> !value.isEmpty())) {
+            throw new AssertionError("Blank sign snapshot retained old editor text");
+        }
     }
 
     private static void accept(ObserverSignScreenPayloads.SignRelay relay) {

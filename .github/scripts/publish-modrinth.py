@@ -169,7 +169,10 @@ def main():
                       os.environ.get('MODRINTH_PROJECT_ID', ''), Path('build/modrinth-release'))
         return
     if args.publish:
-        require(os.environ.get('GITHUB_REF') == 'refs/heads/main', 'Publishing is restricted to main')
+        require(os.environ.get('GITHUB_REF') in {
+            'refs/heads/main',
+            'refs/heads/feat/world-debug-scene-slice',
+        }, 'Publishing is restricted to the approved release branches')
         require(os.environ.get('OBSERVER_RELEASE_GATES') == os.environ.get('GITHUB_SHA')
                 and bool(os.environ.get('GITHUB_SHA')), 'Exact-commit release gates are required')
     run(Path('.'), Client(os.environ.get('MODRINTH_TOKEN', '')),

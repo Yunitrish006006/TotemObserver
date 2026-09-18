@@ -49,7 +49,7 @@ public final class ObserverUiNetworkLoopbackClientGameTest implements FabricClie
         UUID playerId = null;
         try {
             context.waitTicks(2);
-            singleplayer.getClientLevel().waitForChunksRender();
+            singleplayer.getConnection().waitForChunksRender();
             singleplayer.getServer().runCommand("gamemode spectator @a");
 
             playerId = singleplayer.getServer().computeOnServer(server -> {
