@@ -34,7 +34,7 @@ Section "Screen"
     EndSubSection
 EndSection
 EOF
-sudo Xorg "$display" -ac -noreset -config "$config" +extension GLX +extension RANDR >"$log" 2>&1 &
+sudo Xorg "$display" -ac -noreset -config "$config" +extension GLX +extension RANDR +iglx >"$log" 2>&1 &
 xorg_pid=$!
 cleanup() {
     set +e
@@ -45,7 +45,8 @@ cleanup() {
 trap cleanup EXIT
 for _ in $(seq 1 30); do
     if DISPLAY="$display" xdpyinfo >/dev/null 2>&1; then
-        DISPLAY="$display" "$@"
+export LIBGL_ALWAYS_INDIRECT="${LIBGL_ALWAYS_INDIRECT:-1}"
+DISPLAY="$display" "$@"
         exit $?
     fi
     if ! kill -0 "$xorg_pid" 2>/dev/null; then
