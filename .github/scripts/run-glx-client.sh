@@ -45,7 +45,6 @@ cleanup() {
 trap cleanup EXIT
 for _ in $(seq 1 30); do
     if DISPLAY="$display" xdpyinfo >/dev/null 2>&1; then
-export LIBGL_ALWAYS_INDIRECT="${LIBGL_ALWAYS_INDIRECT:-1}"
 DISPLAY="$display" "$@"
         exit $?
     fi
