@@ -45,39 +45,47 @@ public final class ObserverBridgeGameTest {
             UUID expectedId = playerA.getUUID();
             String expectedName = playerA.getGameProfile().name();
 
-            // Re-authentication replaces the active identity without explicitly releasing the old admission first.
-            var authB = new ObserverAccountService.Session(account, UUID.randomUUID());
-            var playB = playSessions.open(authB);
-            return admissions.open(playB).thenAccept(second -> {
-                if (second == null || second.player() == playerA
-                        || !second.player().getUUID().equals(expectedId)
-                        || !second.player().getGameProfile().name().equals(expectedName)) {
-                    throw new AssertionError("Observer replacement did not restore the same server-owned identity");
-                }
-                if (server.getPlayerList().getPlayer(expectedId) != second.player()) {
-                    throw new AssertionError("Replacement Observer player is not the sole PlayerList entry for its UUID");
-                }
-                if (admissions.valid(playA, first)) {
-                    throw new AssertionError("Replaced Observer admission remained valid");
-                }
-                if (!second.player().getInventory().getItem(0).is(Items.DIAMOND)
-                        || second.player().getInventory().getItem(0).getCount() != 7
-                        || second.player().getHealth() != 13.0F) {
-                    throw new AssertionError("Observer replacement did not reload vanilla playerdata");
+            return admissions.snapshot(first).thenCompose(snapshot -> {
+                if (snapshot == null || !snapshot.dimension().contains(":")
+                        || !Double.isFinite(snapshot.x()) || !Double.isFinite(snapshot.y()) || !Double.isFinite(snapshot.z())
+                        || !Float.isFinite(snapshot.yaw()) || !Float.isFinite(snapshot.pitch())) {
+                    throw new AssertionError("Observer player world snapshot was invalid");
                 }
 
-                // A delayed cleanup from the old socket must not remove the replacement player.
-                admissions.release(first);
-                if (server.getPlayerList().getPlayer(expectedId) != second.player()
-                        || !admissions.valid(playB, second)) {
-                    throw new AssertionError("Stale Observer release removed the replacement player");
-                }
+                // Re-authentication replaces the active identity without explicitly releasing the old admission first.
+                var authB = new ObserverAccountService.Session(account, UUID.randomUUID());
+                var playB = playSessions.open(authB);
+                return admissions.open(playB).thenAccept(second -> {
+                    if (second == null || second.player() == playerA
+                            || !second.player().getUUID().equals(expectedId)
+                            || !second.player().getGameProfile().name().equals(expectedName)) {
+                        throw new AssertionError("Observer replacement did not restore the same server-owned identity");
+                    }
+                    if (server.getPlayerList().getPlayer(expectedId) != second.player()) {
+                        throw new AssertionError("Replacement Observer player is not the sole PlayerList entry for its UUID");
+                    }
+                    if (admissions.valid(playA, first)) {
+                        throw new AssertionError("Replaced Observer admission remained valid");
+                    }
+                    if (!second.player().getInventory().getItem(0).is(Items.DIAMOND)
+                            || second.player().getInventory().getItem(0).getCount() != 7
+                            || second.player().getHealth() != 13.0F) {
+                        throw new AssertionError("Observer replacement did not reload vanilla playerdata");
+                    }
 
-                admissions.release(second);
-                playSessions.release(playB);
-                if (server.getPlayerList().getPlayer(expectedId) != null) {
-                    throw new AssertionError("Released Observer player remained in PlayerList");
-                }
+                    // A delayed cleanup from the old socket must not remove the replacement player.
+                    admissions.release(first);
+                    if (server.getPlayerList().getPlayer(expectedId) != second.player()
+                            || !admissions.valid(playB, second)) {
+                        throw new AssertionError("Stale Observer release removed the replacement player");
+                    }
+
+                    admissions.release(second);
+                    playSessions.release(playB);
+                    if (server.getPlayerList().getPlayer(expectedId) != null) {
+                        throw new AssertionError("Released Observer player remained in PlayerList");
+                    }
+                });
             });
         });
         result.whenComplete((ignored, failure) -> {
@@ -116,21 +124,37 @@ public final class ObserverBridgeGameTest {
                                 String message = text.toString();
                                 text.setLength(0);
                                 if (authenticated && message.startsWith("{\"type\":\"hello\"")) {
-                                    if (!message.contains("\"playerAdmission\":true")) {
-                                        pong.completeExceptionally(new IllegalStateException("Player admission capability missing"));
+                                    if (!message.contains("\"playerAdmission\":true")
+                                            || !message.contains("\"worldStateProtocol\":1")) {
+                                        pong.completeExceptionally(new IllegalStateException("Player/world-state capability missing"));
                                     } else {
                                         socket.sendText("{\"type\":\"register\",\"username\":\"gametest\",\"password\":\"isolated-test-password\"}", true);
                                     }
                                 } else if (message.startsWith("{\"type\":\"authenticated\"")) {
                                     if (authenticated && !message.contains("\"playerAttached\":true")) {
                                         pong.completeExceptionally(new IllegalStateException("Authenticated player was not attached"));
+                                    } else if (authenticated) {
+                                        socket.sendText("{\"type\":\"world_state\",\"seq\":0}", true);
                                     } else {
-                                        socket.sendText("{\"type\":\"ping\",\"seq\":0}", true);
+                                        pong.completeExceptionally(new IllegalStateException("Unexpected authenticated bootstrap response"));
+                                    }
+                                } else if (message.startsWith("{\"type\":\"world_state\"")) {
+                                    if (!message.contains("\"protocol\":1")
+                                            || !message.contains("\"seq\":0")
+                                            || !message.contains("\"sessionEpoch\":")
+                                            || !message.contains("\"dimension\":\"minecraft:")
+                                            || !message.contains("\"x\":") || !message.contains("\"y\":") || !message.contains("\"z\":")
+                                            || !message.contains("\"yaw\":") || !message.contains("\"pitch\":")) {
+                                        pong.completeExceptionally(new IllegalStateException("World-state snapshot was incomplete"));
+                                    } else {
+                                        socket.sendText("{\"type\":\"ping\",\"seq\":1}", true);
                                     }
                                 } else if (message.equals("{\"type\":\"hello\",\"protocol\":1,\"capabilities\":[\"ping\"],\"play\":false}")) {
                                     socket.sendText("{\"type\":\"ping\",\"seq\":0}", true);
-                                } else if (message.equals("{\"type\":\"pong\",\"seq\":0}")) pong.complete(null);
-                                else pong.completeExceptionally(new IllegalStateException("Unexpected bridge response"));
+                                } else if (message.equals(authenticated
+                                        ? "{\"type\":\"pong\",\"seq\":1}"
+                                        : "{\"type\":\"pong\",\"seq\":0}")) pong.complete(null);
+                                else pong.completeExceptionally(new IllegalStateException("Unexpected bridge response: " + message));
                             }
                             socket.request(1);
                             return null;

@@ -144,6 +144,26 @@ class _ConnectionPageState extends State<ConnectionPage> {
                           textAlign: TextAlign.center,
                         ),
                       ],
+                      if (connection.hasWorldState) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          '世界維度：${connection.worldDimension}',
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '角色位置：${connection.worldX.toStringAsFixed(2)}, '
+                          '${connection.worldY.toStringAsFixed(2)}, '
+                          '${connection.worldZ.toStringAsFixed(2)}',
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '角色朝向：yaw ${connection.worldYaw.toStringAsFixed(1)} / '
+                          'pitch ${connection.worldPitch.toStringAsFixed(1)}',
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
                       const SizedBox(height: 8),
                       Text(
                         '已收到 ${connection.replies} 次連線回應',
@@ -151,7 +171,9 @@ class _ConnectionPageState extends State<ConnectionPage> {
                       ),
                       const SizedBox(height: 16),
                       Text(
-                        connection.playerAttached
+                        connection.hasWorldState
+                            ? '已取得伺服器權威角色快照；區塊同步、畫面與遊戲操作仍未啟用。'
+                            : connection.playerAttached
                             ? '角色已存在於伺服器世界並使用原版 playerdata；區塊畫面與遊戲操作仍在開發中。'
                             : '已完成帳號與固定玩家身分綁定；進入 Minecraft 世界功能尚在開發中。',
                         textAlign: TextAlign.center,

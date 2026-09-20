@@ -11,16 +11,17 @@ import java.util.*;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 
-/** Account-v1 connection state machine; world streaming and browser gameplay remain disabled. */
+/** Account-v1 connection state machine; chunk streaming and browser gameplay remain disabled. */
 final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<WebSocketFrame> {
     static final String PROTOCOL = "totem-observer-account-v1";
+    static final int WORLD_STATE_PROTOCOL = 1;
     private final ObserverAccountService accounts;
     private final ObserverPlaySessionService playSessions;
     private final ObserverPlayerAdmissionService playerAdmissions;
     private ObserverAccountService.Session session;
     private ObserverPlaySessionService.Session playSession;
     private ObserverPlayerAdmissionService.Admission playerAdmission;
-    private boolean selected, pending, ended;
+    private boolean selected, pending, ended, worldStatePending;
     private long sequence = -1;
     private io.netty.util.concurrent.ScheduledFuture<?> deadline;
 
@@ -37,7 +38,9 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
             ctx.channel().attr(ObserverBridgeServer.READY).set(true);
             send(ctx, "{\"type\":\"hello\",\"protocol\":1,\"authentication\":true,\"registration\":" + accounts.registrationAllowed()
                     + ",\"playerIdentityProtocol\":" + ObserverPlaySessionService.PROTOCOL
-                    + ",\"playerAdmission\":" + (playerAdmissions != null) + ",\"play\":false}");
+                    + ",\"playerAdmission\":" + (playerAdmissions != null)
+                    + ",\"worldStateProtocol\":" + (playerAdmissions == null ? 0 : WORLD_STATE_PROTOCOL)
+                    + ",\"play\":false}");
             deadline = ctx.executor().schedule(() -> stop(ctx, "Login timed out"), 10, TimeUnit.SECONDS);
         } else if (selected && event instanceof IdleStateEvent) stop(ctx, "Connection idle");
         else ctx.fireUserEventTriggered(event);
@@ -73,12 +76,48 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
             if ("logout".equals(type) && message.size() == 1) {
                 send(ctx, "{\"type\":\"logged_out\"}"); stop(ctx, "Logged out"); return;
             }
-            if (!"ping".equals(type) || !message.keySet().equals(Set.of("type", "seq"))) { stop(ctx, "Unsupported operation"); return; }
+            boolean ping = "ping".equals(type);
+            boolean worldState = "world_state".equals(type) && playerAdmissions != null;
+            if (!(ping || worldState) || !message.keySet().equals(Set.of("type", "seq"))) {
+                stop(ctx, "Unsupported operation"); return;
+            }
             long next = Long.parseLong(message.get("seq"));
             if (next <= sequence) { stop(ctx, "Invalid sequence"); return; }
             sequence = next;
-            send(ctx, "{\"type\":\"pong\",\"seq\":" + next + "}");
+            if (ping) send(ctx, "{\"type\":\"pong\",\"seq\":" + next + "}");
+            else requestWorldState(ctx, next);
         } catch (Exception ignored) { stop(ctx, "Invalid message"); }
+    }
+
+    private void requestWorldState(ChannelHandlerContext ctx, long requestSequence) {
+        if (worldStatePending || playerAdmission == null) { stop(ctx, "World state unavailable"); return; }
+        worldStatePending = true;
+        var expectedSession = playSession;
+        var expectedAdmission = playerAdmission;
+        playerAdmissions.snapshot(expectedAdmission).whenComplete((snapshot, failure) -> {
+            try {
+                ctx.executor().execute(() -> finishWorldState(ctx, requestSequence, expectedSession, expectedAdmission, snapshot, failure));
+            } catch (RejectedExecutionException ignored) { }
+        });
+    }
+
+    private void finishWorldState(ChannelHandlerContext ctx, long requestSequence,
+                                  ObserverPlaySessionService.Session expectedSession,
+                                  ObserverPlayerAdmissionService.Admission expectedAdmission,
+                                  ObserverPlayerAdmissionService.WorldState snapshot, Throwable failure) {
+        worldStatePending = false;
+        if (ended || !ctx.channel().isActive()) return;
+        if (failure != null || snapshot == null || playSession != expectedSession || playerAdmission != expectedAdmission
+                || !accounts.valid(session) || !playSessions.valid(session, expectedSession)
+                || !playerAdmissions.valid(expectedSession, expectedAdmission)) {
+            stop(ctx, "World state unavailable");
+            return;
+        }
+        send(ctx, "{\"type\":\"world_state\",\"protocol\":" + WORLD_STATE_PROTOCOL
+                + ",\"seq\":" + requestSequence + ",\"sessionEpoch\":" + expectedSession.epoch()
+                + ",\"dimension\":\"" + snapshot.dimension() + "\",\"x\":" + snapshot.x()
+                + ",\"y\":" + snapshot.y() + ",\"z\":" + snapshot.z()
+                + ",\"yaw\":" + snapshot.yaw() + ",\"pitch\":" + snapshot.pitch() + "}");
     }
 
     private void finishLogin(ChannelHandlerContext ctx, String name, boolean success) {
@@ -147,6 +186,7 @@ final class ObserverAuthenticatedExchange extends SimpleChannelInboundHandler<We
     }
     private void release() {
         if (deadline != null) deadline.cancel(false);
+        worldStatePending = false;
         if (playerAdmission != null) { playerAdmissions.release(playerAdmission); playerAdmission = null; }
         if (playSession != null) { playSessions.release(playSession); playSession = null; }
         if (session != null) { accounts.release(session); session = null; }

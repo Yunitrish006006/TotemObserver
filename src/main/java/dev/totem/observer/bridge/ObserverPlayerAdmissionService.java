@@ -30,7 +30,7 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Owns the Minecraft-side lifetime of authenticated Observer players.
  *
- * <p>All world/player mutations are marshalled onto the Minecraft server thread. The browser never
+ * <p>All world/player mutations and snapshots are marshalled onto the Minecraft server thread. The browser never
  * supplies a profile or UUID: those arrive only through {@link ObserverPlaySessionService}.</p>
  */
 public final class ObserverPlayerAdmissionService implements AutoCloseable {
@@ -42,6 +42,18 @@ public final class ObserverPlayerAdmissionService implements AutoCloseable {
             Objects.requireNonNull(player, "player");
             if (!playSession.identity().uuid().equals(player.getUUID())) {
                 throw new IllegalArgumentException("Player UUID does not match reserved identity");
+            }
+        }
+    }
+
+    /** Minimal server-authoritative state only; this is not a chunk/world streaming contract. */
+    public record WorldState(String dimension, double x, double y, double z, float yaw, float pitch) {
+        public WorldState {
+            Objects.requireNonNull(dimension, "dimension");
+            if (!dimension.matches("[a-z0-9_.-]+:[a-z0-9_./-]+")
+                    || !Double.isFinite(x) || !Double.isFinite(y) || !Double.isFinite(z)
+                    || !Float.isFinite(yaw) || !Float.isFinite(pitch)) {
+                throw new IllegalArgumentException("Invalid world state");
             }
         }
     }
@@ -79,6 +91,30 @@ public final class ObserverPlayerAdmissionService implements AutoCloseable {
         if (closed || playSession == null || admission == null || !admission.playSession().equals(playSession)) return false;
         var current = active.get(playSession.account());
         return current != null && current.admission().equals(admission);
+    }
+
+    /** Captures the currently admitted player's location only on the Minecraft server thread. */
+    public CompletableFuture<WorldState> snapshot(Admission admission) {
+        var result = new CompletableFuture<WorldState>();
+        if (admission == null) {
+            result.complete(null);
+            return result;
+        }
+        execute(() -> {
+            try {
+                if (!valid(admission.playSession(), admission)) {
+                    result.complete(null);
+                    return;
+                }
+                var player = admission.player();
+                result.complete(new WorldState(
+                        player.level().dimension().identifier().toString(),
+                        player.getX(), player.getY(), player.getZ(), player.getYRot(), player.getXRot()));
+            } catch (Throwable failure) {
+                result.completeExceptionally(failure);
+            }
+        });
+        return result;
     }
 
     /** Removal is asynchronous when called from a Netty thread; PlayerList.remove performs the save. */
