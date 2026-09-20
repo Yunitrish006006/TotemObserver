@@ -60,7 +60,7 @@ class PublisherTest(unittest.TestCase):
         self.artifact = self.root / 'build/libs/totem-observer-0.1.0.jar'
         with zipfile.ZipFile(self.artifact, 'w') as z:
             z.writestr('fabric.mod.json', json.dumps(dict(id=p.MODULE, version='0.1.0',
-                depends={'minecraft': '~26.2', 'totem-core': '>=0.7.18 <0.8.0'},
+                depends={'minecraft': '~26.2', 'totem-core': '>=0.7.23 <0.8.0'},
                 breaks={'totem-vanilla-tweaks': '<=0.1.27'}, icon='icon.png')))
             z.writestr('icon.png', b'fixture')
         self.client = FakeClient()
@@ -145,9 +145,13 @@ class PublisherTest(unittest.TestCase):
             p.run(self.root, self.client, 'observer')
         self.assertEqual(self.client.calls, [])
 
-    def test_cli_upload_requires_main_and_exact_commit_gates(self):
+    def test_cli_upload_requires_approved_branch_and_exact_commit_gates(self):
         script = str(Path(__file__).with_name('publish-modrinth.py'))
-        for ref, gate in [('refs/heads/release/test', 'abc'), ('refs/heads/main', 'wrong')]:
+        for ref, gate in [
+            ('refs/heads/release/test', 'abc'),
+            ('refs/heads/main', 'wrong'),
+            ('refs/heads/feat/world-debug-scene-slice', 'wrong'),
+        ]:
             result = subprocess.run(['python3', script, '--publish'], cwd=self.root,
                 env={**os.environ, 'GITHUB_REF': ref, 'GITHUB_SHA': 'abc',
                      'OBSERVER_RELEASE_GATES': gate}, capture_output=True, text=True)

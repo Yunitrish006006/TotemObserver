@@ -23,7 +23,7 @@ public final class ObserverEnchantingClientGameTest implements FabricClientGameT
     public void runTest(ClientGameTestContext context) {
         try (TestSingleplayerContext singleplayer = context.worldBuilder().create()) {
             context.waitTicks(2);
-            singleplayer.getClientLevel().waitForChunksRender();
+            singleplayer.getConnection().waitForChunksRender();
 
             UUID targetId = UUID.randomUUID();
             ObserverEnchantingScreenPayloads.EnchantingRelay open = new ObserverEnchantingScreenPayloads.EnchantingRelay(

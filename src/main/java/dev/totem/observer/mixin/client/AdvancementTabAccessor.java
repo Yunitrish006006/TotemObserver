@@ -11,4 +11,5 @@ public interface AdvancementTabAccessor {
     @Accessor("scrollY") double totem$getScrollY();
     @Accessor("scrollX") void totem$setScrollX(double value);
     @Accessor("scrollY") void totem$setScrollY(double value);
+    @Accessor("centered") void totem$setCentered(boolean value);
 }

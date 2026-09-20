@@ -2,6 +2,10 @@
   "name": "observer-client-browser-tests",
   "private": true,
   "type": "module",
-  "scripts": { "test": "node login.mjs" },
-  "devDependencies": { "playwright": "1.63.0" }
+  "scripts": {
+    "test": "node login.mjs && node movement.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0"
+  }
 }
