@@ -30,6 +30,8 @@ const hello = {
   'registration': true,
   'playerIdentityProtocol': 1,
   'playerAdmission': true,
+  'worldProtocol': 1,
+  'worldWindowProtocol': 1,
   'play': false,
 };
 const authenticated = {
@@ -42,11 +44,34 @@ const authenticated = {
   'playerAttached': true,
   'play': false,
 };
+const worldBootstrap = {
+  'type': 'world_bootstrap',
+  'protocol': 1,
+  'sessionEpoch': 42,
+  'dimension': 'minecraft:overworld',
+  'x': -5.5,
+  'y': 142.0,
+  'z': -5.5,
+  'yaw': 90.0,
+  'pitch': 0.0,
+  'gameTime': 1200,
+  'defaultClockTime': 1200,
+  'play': false,
+};
+const worldWindow = {
+  'type': 'world_window',
+  'protocol': 1,
+  'sessionEpoch': 42,
+  'dimension': 'minecraft:overworld',
+  'centerChunkX': -1,
+  'centerChunkZ': -1,
+  'radius': 1,
+  'revision': 1,
+  'play': false,
+};
 
 void main() {
-  testWidgets('login clears password, accepts admitted player and logs out', (
-    tester,
-  ) async {
+  testWidgets('login accepts world control plane and logs out', (tester) async {
     final socket = FakeTransport();
     final connection = ObserverConnection(open: (_) => socket);
     await tester.pumpWidget(ObserverApp(connection: connection));
@@ -60,6 +85,10 @@ void main() {
     socket.receive(hello);
     expect(jsonDecode(socket.sent.single)['password'], 'local-test-password');
     socket.receive(authenticated);
+    expect(connection.status, '玩家已接入 Minecraft，等待世界控制面同步…');
+    socket.receive(worldBootstrap);
+    expect(connection.status, '玩家已接入 Minecraft，世界核心已同步，等待區塊視窗…');
+    socket.receive(worldWindow);
     socket.receive({'type': 'pong', 'seq': 0});
     await tester.pump();
     expect(find.text('登入帳號：alice'), findsOneWidget);
@@ -69,8 +98,20 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('角色狀態：已接入 Minecraft 玩家清單'), findsOneWidget);
+    expect(find.text('世界維度：minecraft:overworld'), findsOneWidget);
+    expect(find.text('初始位置：-5.50, 142.00, -5.50'), findsOneWidget);
+    expect(
+      find.text('區塊視窗：中心 -1, -1；半徑 1（9 個 chunk identity）'),
+      findsOneWidget,
+    );
     expect(connection.sessionEpoch, 42);
     expect(connection.playerAttached, isTrue);
+    expect(connection.world?.dimension, 'minecraft:overworld');
+    expect(connection.world?.defaultClockTime, 1200);
+    expect(connection.world?.window?.revision, 1);
+    expect(connection.world?.requestedChunkCount, 9);
+    expect(connection.world?.requestedChunks.length, 9);
+    expect(connection.status, '玩家已接入 Minecraft，世界控制面已同步');
     expect(find.text('已收到 1 次連線回應'), findsOneWidget);
     await tester.tap(find.widgetWithText(ElevatedButton, '登出'));
     await tester.pump();
@@ -79,6 +120,7 @@ void main() {
     expect(connection.account, isEmpty);
     expect(connection.playerUuid, isEmpty);
     expect(connection.playerAttached, isFalse);
+    expect(connection.world, isNull);
     connection.dispose();
   });
 
@@ -94,6 +136,8 @@ void main() {
       );
       socket.receive(hello);
       socket.receive(authenticated);
+      socket.receive(worldBootstrap);
+      socket.receive(worldWindow);
       await tester.pump(const Duration(seconds: 13));
       expect(connection.phase, ConnectionPhase.offline);
       expect(connection.status, '伺服器未回應，連線已結束');
@@ -101,6 +145,41 @@ void main() {
       connection.dispose();
     },
   );
+
+  testWidgets('advertised world bootstrap must arrive promptly', (
+    tester,
+  ) async {
+    final socket = FakeTransport();
+    final connection = ObserverConnection(open: (_) => socket);
+    await connection.authenticate(
+      'ws://127.0.0.1:25580/observer/bridge',
+      'alice',
+      'local-test-password',
+    );
+    socket.receive(hello);
+    socket.receive(authenticated);
+    await tester.pump(const Duration(seconds: 6));
+    expect(connection.phase, ConnectionPhase.offline);
+    expect(connection.status, '世界控制面同步逾時，請重新連線');
+    connection.dispose();
+  });
+
+  testWidgets('advertised world window must arrive promptly', (tester) async {
+    final socket = FakeTransport();
+    final connection = ObserverConnection(open: (_) => socket);
+    await connection.authenticate(
+      'ws://127.0.0.1:25580/observer/bridge',
+      'alice',
+      'local-test-password',
+    );
+    socket.receive(hello);
+    socket.receive(authenticated);
+    socket.receive(worldBootstrap);
+    await tester.pump(const Duration(seconds: 6));
+    expect(connection.phase, ConnectionPhase.offline);
+    expect(connection.status, '世界控制面同步逾時，請重新連線');
+    connection.dispose();
+  });
 
   testWidgets('old connection cannot authenticate a replacement', (
     tester,
@@ -124,6 +203,80 @@ void main() {
     second.receive(hello);
     second.receive(authenticated);
     expect(connection.phase, ConnectionPhase.connected);
+    connection.dispose();
+  });
+
+  testWidgets('rejects world bootstrap from a stale session epoch', (
+    tester,
+  ) async {
+    final socket = FakeTransport();
+    final connection = ObserverConnection(open: (_) => socket);
+    await connection.authenticate(
+      'ws://127.0.0.1:25580/observer/bridge',
+      'alice',
+      'local-test-password',
+    );
+    socket.receive(hello);
+    socket.receive(authenticated);
+    socket.receive({...worldBootstrap, 'sessionEpoch': 41});
+    expect(connection.phase, ConnectionPhase.offline);
+    expect(connection.status, '伺服器回應不相容，請重新連線');
+    connection.dispose();
+  });
+
+  testWidgets('rejects world window from a stale session epoch', (
+    tester,
+  ) async {
+    final socket = FakeTransport();
+    final connection = ObserverConnection(open: (_) => socket);
+    await connection.authenticate(
+      'ws://127.0.0.1:25580/observer/bridge',
+      'alice',
+      'local-test-password',
+    );
+    socket.receive(hello);
+    socket.receive(authenticated);
+    socket.receive(worldBootstrap);
+    socket.receive({...worldWindow, 'sessionEpoch': 41});
+    expect(connection.phase, ConnectionPhase.offline);
+    expect(connection.status, '伺服器回應不相容，請重新連線');
+    connection.dispose();
+  });
+
+  testWidgets('rejects world window that does not center bootstrap chunk', (
+    tester,
+  ) async {
+    final socket = FakeTransport();
+    final connection = ObserverConnection(open: (_) => socket);
+    await connection.authenticate(
+      'ws://127.0.0.1:25580/observer/bridge',
+      'alice',
+      'local-test-password',
+    );
+    socket.receive(hello);
+    socket.receive(authenticated);
+    socket.receive(worldBootstrap);
+    socket.receive({...worldWindow, 'centerChunkX': 0});
+    expect(connection.phase, ConnectionPhase.offline);
+    expect(connection.status, '伺服器回應不相容，請重新連線');
+    connection.dispose();
+  });
+
+  testWidgets('accepts non-vanilla namespaced world identity', (tester) async {
+    final socket = FakeTransport();
+    final connection = ObserverConnection(open: (_) => socket);
+    await connection.authenticate(
+      'ws://127.0.0.1:25580/observer/bridge',
+      'alice',
+      'local-test-password',
+    );
+    socket.receive(hello);
+    socket.receive(authenticated);
+    socket.receive({...worldBootstrap, 'dimension': 'totem_nexus:orbit'});
+    socket.receive({...worldWindow, 'dimension': 'totem_nexus:orbit'});
+    expect(connection.phase, ConnectionPhase.connected);
+    expect(connection.world?.dimension, 'totem_nexus:orbit');
+    expect(connection.world?.requestedChunkCount, 9);
     connection.dispose();
   });
 
