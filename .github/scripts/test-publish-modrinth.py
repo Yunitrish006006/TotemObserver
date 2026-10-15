@@ -60,7 +60,7 @@ class PublisherTest(unittest.TestCase):
         self.artifact = self.root / 'build/libs/totem-observer-0.1.0.jar'
         with zipfile.ZipFile(self.artifact, 'w') as z:
             z.writestr('fabric.mod.json', json.dumps(dict(id=p.MODULE, version='0.1.0',
-                depends={'minecraft': '~26.2', 'totem-core': '>=0.7.18 <0.8.0'},
+                depends={'minecraft': '~26.2', 'totem-core': '>=0.7.23 <0.8.0'},
                 breaks={'totem-vanilla-tweaks': '<=0.1.27'}, icon='icon.png')))
             z.writestr('icon.png', b'fixture')
         self.client = FakeClient()

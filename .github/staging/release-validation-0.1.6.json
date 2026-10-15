@@ -1,0 +1,12 @@
+{
+  "version": "0.1.6",
+  "java": 25,
+  "minecraft": "26.3",
+  "artifact": "totem-observer-0.1.6.jar",
+  "sha512": "d43c12662869f42fab981669e6c1dae9d6400d461a626ff870398c9618905a97c016c110cc02c9598e5996ae59bb74626f2997e14a8b8314fcee1c0a656584ec",
+  "core_version": "0.7.23",
+  "core_source_commit": "424b90dc3929caa8c1afcfca7e63c50a64bde669",
+  "core_artifact_sha512": "c3d2f88252ee23500d91f7d49a742f47ae981f25acf1e3cdfcf76c81aa36319943ea92f7aa0a7caf1685d89cb765a1e83ac6a0ee1f1af00cec9ea071cdbe923d",
+  "validation_scope": "Native sidebar implementation previously passed final client/all8 owner-UI scoped3JVM. IntegrationAPI compile and publisher11policytests passed. Full exact-source Build/Runtime/E2E required before publication; full account admission is not waived. Graphics wrapper TERM/client-failure cleanup tests2passed; publisherpolicy11passed; shell/YAML parsed.",
+  "independent_review": "Independent review cleared immutable exact-source artifact/security gates, version/hash metadata, and fixed TERM/INT graphics subprocess ownership/reaping. Full three CI gates remain mandatory before upload."
+}

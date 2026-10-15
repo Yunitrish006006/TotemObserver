@@ -37,6 +37,9 @@ jobs:
         with:
           cache-disabled: true
 
+      - name: Test graphics wrapper process cleanup
+        run: python3 .github/scripts/test-run-glx-client.py
+
       - name: Build pinned TotemCore
         shell: bash
         run: |
@@ -124,3 +127,28 @@ jobs:
             exit 1
           fi
           bash .github/scripts/check-owned-observer-screens.sh .
+
+      - name: Bind validated release artifact to this Build
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^mod_version=//p' gradle.properties)"
+          archive="$(sed -n 's/^archives_base_name=//p' gradle.properties)"
+          artifact="${archive}-${version}.jar"
+          core_source="$(git -C .lockstep/TotemCore rev-parse HEAD)"
+          test "$core_source" = 424b90dc3929caa8c1afcfca7e63c50a64bde669
+          core_sha="$(sha512sum .lockstep/TotemCore/build/libs/totem-core-0.7.23.jar | awk '{print $1}')"
+          test "$core_sha" = "$(jq -er .core_artifact_sha512 ".github/staging/release-validation-${version}.json")"
+          sha="$(sha512sum "build/libs/${artifact}" | awk '{print $1}')"
+          test "$sha" = "$(jq -er .sha512 ".github/staging/release-validation-${version}.json")"
+          mkdir -p build/release-artifact
+          cp "build/libs/${artifact}" build/release-artifact/
+          jq -n --arg repository "$GITHUB_REPOSITORY" --arg source "$GITHUB_SHA" --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" --arg version "$version" --arg artifact "$artifact" --arg sha "$sha" --arg core_source "$core_source" --arg core_sha "$core_sha" '{repository:$repository,source_commit:$source,run_id:$run,run_attempt:$attempt,version:$version,artifact:$artifact,sha512:$sha,core_version:"0.7.23",core_source_commit:$core_source,core_artifact_sha512:$core_sha}' > build/release-artifact/build-provenance.json
+
+      - name: Upload immutable validated release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ github.sha }}-${{ github.run_attempt }}
+          path: build/release-artifact/
+          if-no-files-found: error
+          retention-days: 14

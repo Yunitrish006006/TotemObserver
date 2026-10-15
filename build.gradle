@@ -11,7 +11,7 @@ def totemCoreJar = file(providers.gradleProperty('totemCoreJar')
         .getOrElse('../TotemCore/build/libs/totem-core-0.7.23.jar'))
 def observerIntegrationJars = [
         remnant   : file(providers.gradleProperty('totemRemnantJar')
-                .getOrElse('../TotemRemnant/build/libs/totem-remnant-0.2.27.jar')),
+                .getOrElse('../TotemRemnant/build/libs/totem-remnant-0.2.28.jar')),
         automata  : file(providers.gradleProperty('totemAutomataJar')
                 .getOrElse('../TotemAutomata/build/libs/totem-automata-0.1.28.jar')),
         nexus     : file(providers.gradleProperty('totemNexusJar')
@@ -177,6 +177,7 @@ tasks.register('runProductionClientGameTest', net.fabricmc.loom.task.prod.Client
     jvmArgs.add('-Dfabric.client.gametest')
     jvmArgs.add('-Dfabric.client.gametest.disableNetworkSynchronizer=true')
     useXVFB = true
+    programArgs.addAll(['--graphicsBackend', 'VULKAN'])
 }
 
 // A Loom run has exactly one primary SourceSet. E2E runs use main and append the test mod output.

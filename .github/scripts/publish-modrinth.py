@@ -13,7 +13,7 @@ import uuid
 import zipfile
 
 API = 'https://api.modrinth.com/v2'
-CORE_FILE = 'totem-core-0.7.18.jar'
+CORE_FILE = 'totem-core-0.7.23.jar'
 FABRIC = 'P7dR8mSH'
 MODULE = 'totem-observer'
 
@@ -119,7 +119,7 @@ def run(root, client, project_ref, publish=False):
         mod = json.loads(jar.read('fabric.mod.json'))
         require(mod['id'] == MODULE and mod['version'] == version, 'JAR identity mismatch')
         require(mod['depends']['minecraft'] == '~' + minecraft, 'Minecraft version mismatch')
-        require(mod['depends']['totem-core'] == '>=0.7.18 <0.8.0', 'Core dependency mismatch')
+        require(mod['depends']['totem-core'] == '>=0.7.23 <0.8.0', 'Core dependency mismatch')
         require(mod.get('breaks', {}).get('totem-vanilla-tweaks') == '<=0.1.27',
                 'Observer extraction incompatibility is missing')
         require(mod.get('icon') in jar.namelist(), 'JAR icon is missing')

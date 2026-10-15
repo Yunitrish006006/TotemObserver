@@ -50,7 +50,7 @@ public final class ObserverCrossModuleProductionSenderClientGameTest implements 
 
     @Override public void runTest(ClientGameTestContext context) {
         try (TestSingleplayerContext world = context.worldBuilder().create()) {
-            world.getClientLevel().waitForChunksRender();
+            world.getConnection().waitForChunksRender();
             context.getInput().resizeWindow(1280, 720);
             remnant(context);
             automata(context);
