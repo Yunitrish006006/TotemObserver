@@ -16,7 +16,8 @@ This isolated integration carries the existing released Minecraft 26.3 native
 API adaptations (sign text slots, advancement positioning, SDL input callbacks)
 and their existing tests. The source version aligns to the already released
 Observer 0.1.5 baseline. Authentication and readonly cancellation predicates stay
-unchanged. Unrelated world/browser feature commits are excluded.
+unchanged. The published 0.1.5 bridge capability baseline is retained; unrelated dirty
+world/browser branch work is excluded.
 
 ## Validation (2026-10-15)
 

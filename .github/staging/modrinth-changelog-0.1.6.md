@@ -3,6 +3,7 @@
 - Respect module-owned native Remnant sidebars on inventory, crafting, enchanting and chest screens.
 - Suppress competing native adapters even when owner capture fails or transport capability is unavailable.
 - Exclude appended sidebar slots from legacy native snapshots.
+- Retain all previously published world/bridge protocol capabilities.
 - Align Minecraft 26.3 native APIs and headless runtime validation.
 - Publish only the exact tested immutable Build artifact after all release gates pass.
 

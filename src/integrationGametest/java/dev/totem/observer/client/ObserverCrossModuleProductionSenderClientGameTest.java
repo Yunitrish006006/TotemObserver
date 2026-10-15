@@ -25,6 +25,7 @@ import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.input.KeyEvent;
+import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.client.input.MouseButtonInfo;
 import net.minecraft.core.component.DataComponents;
@@ -124,13 +125,9 @@ public final class ObserverCrossModuleProductionSenderClientGameTest implements 
         context.runOnClient(client -> client.setScreenAndShow(handle.screen()));
         context.waitFor(client -> client.gui.screen() == handle.screen()
                 && ObserverNexusIntegrationFixture.isManagementOnly(client.gui.screen(), interfaceType), 100);
-        context.runOnClient(client -> {
-            if (!handle.screen().keyPressed(new KeyEvent(256, 0, 0)) || !stopped.get()) {
-                throw new AssertionError("Nexus " + interfaceType.id()
-                        + " management-only Observer screen did not close read-only");
-            }
-            client.setScreenAndShow(null);
-        });
+        context.getInput().pressKey(InputConstants.KEY_ESCAPE);
+        context.waitFor(client -> stopped.get(), 100);
+        context.runOnClient(client -> client.setScreenAndShow(null));
         context.waitForScreen(null);
     }
 
@@ -213,8 +210,8 @@ public final class ObserverCrossModuleProductionSenderClientGameTest implements 
             assertNativeScaleBounds(client, screen, expectedClass);
             packetBaseline.set(ObserverReadOnlyPacketFirewall.suppressedMutationPacketTotal());
             assertInventoryUnchanged(localInventoryBefore.get(), client.player.getInventory(), expectedClass);
-            if (!screen.mouseClicked(new MouseButtonEvent(1, 1, new MouseButtonInfo(0, 0)), false)
-                    || !screen.keyPressed(new KeyEvent(65, 0, 0))) {
+            if (!screen.mouseClicked(new MouseButtonEvent(1, 1, new MouseButtonInfo(InputConstants.MOUSE_BUTTON_LEFT, 0)), false)
+                    || !screen.keyPressed(new KeyEvent(InputConstants.KEY_A, 0, 0))) {
                 throw new AssertionError(expectedClass + " accepted local Observer input");
             }
             if (screen instanceof AbstractContainerScreen<?> container) {
@@ -224,10 +221,10 @@ public final class ObserverCrossModuleProductionSenderClientGameTest implements 
             }
         });
         persist(context.takeScreenshot(screenshotName), screenshotName + ".png");
+        // Exercise the actual native keyboard/firewall stop path for every owner.
+        context.getInput().pressKey(InputConstants.KEY_ESCAPE);
+        context.waitFor(client -> stopped.get(), 100);
         context.runOnClient(client -> {
-            Screen screen = client.gui.screen();
-            if (!screen.keyPressed(new KeyEvent(256, 0, 0)) || !stopped.get())
-                throw new AssertionError(expectedClass + " Escape did not stop observing");
             client.setScreenAndShow(null);
             if (ObserverReadOnlyPacketFirewall.suppressedMutationPacketTotal() != packetBaseline.get())
                 throw new AssertionError(expectedClass + " attempted a mutation packet in read-only mode");

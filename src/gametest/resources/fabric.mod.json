@@ -37,7 +37,11 @@
     ],
     "fabric-gametest": [
       "dev.totem.observer.bridge.ObserverBridgeGameTest",
-      "dev.totem.observer.runtime.ObserverAccessGameTest"
+      "dev.totem.observer.runtime.ObserverAccessGameTest",
+      "dev.totem.observer.bridge.ObserverWorldSectionUnavailableGameTest",
+      "dev.totem.observer.bridge.ObserverBlockStateRegistryGameTest",
+      "dev.totem.observer.bridge.ObserverMovementDriverGameTest",
+      "dev.totem.observer.bridge.ObserverMovementProtocolGameTest"
     ]
   },
   "depends": {
