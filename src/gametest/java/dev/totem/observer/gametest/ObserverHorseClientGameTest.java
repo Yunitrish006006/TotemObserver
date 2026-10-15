@@ -26,7 +26,7 @@ import java.util.UUID;
 public final class ObserverHorseClientGameTest implements FabricClientGameTest {
     @Override public void runTest(ClientGameTestContext context) {
         try (TestSingleplayerContext world = context.worldBuilder().create()) {
-            world.getClientLevel().waitForChunksRender();
+            world.getConnection().waitForChunksRender();
             UUID target = UUID.randomUUID(), mount = UUID.randomUUID();
             context.runOnClient(client -> {
                 applySession(true, target, ObserverHorseScreenPayloads.CAPABILITY);

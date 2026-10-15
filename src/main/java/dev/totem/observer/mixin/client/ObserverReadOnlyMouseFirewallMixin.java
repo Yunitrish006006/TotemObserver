@@ -28,7 +28,7 @@ public abstract class ObserverReadOnlyMouseFirewallMixin {
     }
 
     @Inject(method = "onMove", at = @At("HEAD"), cancellable = true)
-    private void totem$blockObserverMove(long window, double x, double y, CallbackInfo ci) {
+    private void totem$blockObserverMove(long window, double x, double y, double deltaX, double deltaY, CallbackInfo ci) {
         if (ObserverNativeClient.observerSessionActive() || ObserverOwnedScreenCoordinator.isReadOnlyObserverScreen(minecraft.gui.screen())) ci.cancel();
     }
 }

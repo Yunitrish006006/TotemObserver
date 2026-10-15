@@ -30,7 +30,7 @@ final class ObserverAbsentOwnerProviderAssertions {
         }
         try (TestSingleplayerContext singleplayer = context.worldBuilder().create()) {
             context.waitTicks(2);
-            singleplayer.getClientLevel().waitForChunksRender();
+            singleplayer.getConnection().waitForChunksRender();
             UUID targetId = UUID.randomUUID();
             context.runOnClient(minecraft -> {
                 applySession(true, targetId);

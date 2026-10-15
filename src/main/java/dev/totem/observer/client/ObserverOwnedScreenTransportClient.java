@@ -32,6 +32,9 @@ public final class ObserverOwnedScreenTransportClient {
     private static float lastCursorX = Float.NaN, lastCursorY = Float.NaN;
     private static ItemStack lastCarried = ItemStack.EMPTY;
     private static boolean providersAdvertised;
+    private static Screen ownershipScreen;
+    private static long ownershipTick = Long.MIN_VALUE;
+    private static boolean ownershipClaim;
     private static final Map<String, Long> CAPTURE_ERROR_LOG_NANOS = new HashMap<>();
 
     private ObserverOwnedScreenTransportClient() { }
@@ -96,6 +99,18 @@ public final class ObserverOwnedScreenTransportClient {
         ClientPlayNetworking.send(new ObserverRemoteCursorPayloads.State(
                 ObserverRemoteCursorPayloads.PROTOCOL_VERSION, ++cursorSequence, identity.family(), identity.variant(),
                 identity.protocol(), x, y, width, height, carried));
+    }
+
+    /** Native adapters defer to a module's semantic provider according to local ownership, independently of peer capabilities. */
+    public static boolean ownsTargetScreen(Screen screen) {
+        if (screen == null || !ObserverNativeClient.targetStateEnabled()
+                || ObserverOwnedScreenCoordinator.isReadOnlyObserverScreen(screen)) return false;
+        var minecraft = Minecraft.getInstance();
+        long tick = minecraft.player == null ? Long.MIN_VALUE : minecraft.player.tickCount;
+        if (screen == ownershipScreen && tick == ownershipTick) return ownershipClaim;
+        ownershipScreen = screen; ownershipTick = tick; ownershipClaim = false;
+        ownershipClaim = ObserverScreenOwnership.claims(screen, providers.values(), sequence + 1);
+        return ownershipClaim;
     }
 
     private static void tickTarget(Minecraft minecraft) {

@@ -8,18 +8,18 @@ group = project.maven_group
 base { archivesName = project.archives_base_name }
 
 def totemCoreJar = file(providers.gradleProperty('totemCoreJar')
-        .getOrElse('../TotemCore/build/libs/totem-core-0.7.18.jar'))
+        .getOrElse('../TotemCore/build/libs/totem-core-0.7.23.jar'))
 def observerIntegrationJars = [
         remnant   : file(providers.gradleProperty('totemRemnantJar')
-                .getOrElse('../TotemRemnant/build/libs/totem-remnant-0.2.21.jar')),
+                .getOrElse('../TotemRemnant/build/libs/totem-remnant-0.2.27.jar')),
         automata  : file(providers.gradleProperty('totemAutomataJar')
-                .getOrElse('../TotemAutomata/build/libs/totem-automata-0.1.24.jar')),
+                .getOrElse('../TotemAutomata/build/libs/totem-automata-0.1.28.jar')),
         nexus     : file(providers.gradleProperty('totemNexusJar')
-                .getOrElse('../TotemNexus/build/libs/totem-nexus-0.3.17.jar')),
+                .getOrElse('../TotemNexus/build/libs/totem-nexus-0.3.25.jar')),
         villagers : file(providers.gradleProperty('totemVillagersJar')
-                .getOrElse('../TotemVillagers/build/libs/totem-villagers-0.1.36.jar')),
+                .getOrElse('../TotemVillagers/build/libs/totem-villagers-0.1.39.jar')),
         locksmith : file(providers.gradleProperty('totemLocksmithJar')
-                .getOrElse('../TotemLocksmith/build/libs/totem-locksmith-0.1.10.jar'))
+                .getOrElse('../TotemLocksmith/build/libs/totem-locksmith-0.1.13.jar'))
 ]
 
 def observerE2eResults = file("${buildDir}/e2e/results").absolutePath
@@ -266,9 +266,20 @@ tasks.named('runE2eServer').configure {
         File dir = file('build/e2e/server')
         dir.mkdirs()
         new File(dir, 'eula.txt').text = 'eula=true\n'
+        // Admit only the two Java clients and the account-v1 admission fixture.
+        // Minecraft defaults may enable the whitelist even on a fresh world.
+        def testPlayers = ['Target', 'Observer'].collect { name ->
+            [uuid: UUID.nameUUIDFromBytes("OfflinePlayer:${name}".getBytes('UTF-8')).toString(), name: name]
+        }
+        // Same deterministic identity as ObserverPlayerIdentity.forAccount;
+        // ObserverBridgeAdmissionE2eCoordinator uses this fixed test account.
+        def bridgeId = UUID.nameUUIDFromBytes('totem-observer:external-player:e2e_bridge'.getBytes('UTF-8')).toString()
+        testPlayers.add([uuid: bridgeId, name: 'obs_' + bridgeId.replace('-', '').substring(0, 12)])
+        new File(dir, 'whitelist.json').text = groovy.json.JsonOutput.toJson(testPlayers) + '\n'
         new File(dir, 'server.properties').text = '''server-port=25570
 online-mode=false
 enforce-secure-profile=false
+white-list=true
 spawn-protection=0
 view-distance=2
 simulation-distance=2
