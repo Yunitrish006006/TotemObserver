@@ -1,0 +1,15 @@
+{
+  "version": "0.1.7",
+  "project_id": "9uSvHWrC",
+  "project_status": "processing",
+  "requested_status": "approved",
+  "sha512": "36cbd8326de94a6eacdda1bc20423f8fc342a46da44a0c1e092ce3781c469c8ae76057b59e98dd809f8362e351139869b84763badde63a46a0cff835c895a0ff",
+  "file": "totem-observer-0.1.7.jar",
+  "upload_team_permission": true,
+  "existing_identical_version": false,
+  "dry_run": false,
+  "token_version_create_scope": "verified_by_upload",
+  "modrinth_version_id": "2tt3pe3R",
+  "verified_by_run": "38873921360",
+  "release_ref": "cb8164b3f36d3d3a32dec6cc63e546dd021c1853"
+}
