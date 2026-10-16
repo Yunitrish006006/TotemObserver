@@ -24,7 +24,8 @@ import java.util.*;
 
 /** Real target Screens drive the production owner capture/relay, rather than synthetic state packets. */
 public final class ObserverRemnantSidebarE2eBridge implements ClientModInitializer {
-    private static final String[] VARIANTS={"inventory","crafting","enchanting","chest"};
+    private static final String[] VARIANTS={"inventory","crafting","enchanting","chest","furnace","smoker","blast_furnace","anvil","stonecutter","smithing","grindstone","loom","cartography","brewing","hopper","merchant"};
+    static int caseCount() { return VARIANTS.length * 2; }
     private static String role;
     private static Boolean available;
     private static int phase;
@@ -42,7 +43,7 @@ public final class ObserverRemnantSidebarE2eBridge implements ClientModInitializ
     private static boolean marker(String name){return Files.exists(ObserverE2eCommon.resultsDir().resolve(name));}
     private static void mark(String name,String text){ObserverE2eCommon.marker(name,text+"\n");}
     private static void tick(Minecraft client) {
-        if(phase>=8||!marker("observer-native-remnant-death-closed.txt")||!enabled()||client.player==null||client.level==null)return;
+        if(phase>=VARIANTS.length*2||!marker("observer-native-remnant-death-closed.txt")||!enabled()||client.player==null||client.level==null)return;
         try {if(role.equals("target"))target(client);else if(role.equals("observer"))observer(client);}
         catch(Throwable error){mark("failure-remnant-sidebar.txt",error.toString());throw new AssertionError("Sidebar E2E "+key(),error);}
     }
@@ -56,6 +57,18 @@ public final class ObserverRemnantSidebarE2eBridge implements ClientModInitializ
                 case "inventory"->new InventoryScreen(target);
                 case "crafting"->new CraftingScreen(new CraftingMenu(99,inv),inv,Component.literal("Sidebar Crafting"));
                 case "enchanting"->new EnchantmentScreen(new EnchantmentMenu(99,inv),inv,Component.literal("Sidebar Enchanting"));
+                case "furnace"->new FurnaceScreen(new FurnaceMenu(99,inv),inv,Component.literal("Sidebar furnace"));
+                case "smoker"->new SmokerScreen(new SmokerMenu(99,inv),inv,Component.literal("Sidebar smoker"));
+                case "blast_furnace"->new BlastFurnaceScreen(new BlastFurnaceMenu(99,inv),inv,Component.literal("Sidebar blast_furnace"));
+                case "anvil"->new AnvilScreen(new AnvilMenu(99,inv),inv,Component.literal("Sidebar anvil"));
+                case "stonecutter"->new StonecutterScreen(new StonecutterMenu(99,inv),inv,Component.literal("Sidebar stonecutter"));
+                case "smithing"->new SmithingScreen(new SmithingMenu(99,inv),inv,Component.literal("Sidebar smithing"));
+                case "grindstone"->new GrindstoneScreen(new GrindstoneMenu(99,inv),inv,Component.literal("Sidebar grindstone"));
+                case "loom"->new LoomScreen(new LoomMenu(99,inv),inv,Component.literal("Sidebar loom"));
+                case "cartography"->new CartographyTableScreen(new CartographyTableMenu(99,inv),inv,Component.literal("Sidebar cartography"));
+                case "brewing"->new BrewingStandScreen(new BrewingStandMenu(99,inv),inv,Component.literal("Sidebar brewing"));
+                case "hopper"->new HopperScreen(new HopperMenu(99,inv),inv,Component.literal("Sidebar hopper"));
+                case "merchant"->new MerchantScreen(new MerchantMenu(99,inv),inv,Component.literal("Sidebar merchant"));
                 default->new ContainerScreen(ChestMenu.threeRows(99,inv),inv,Component.literal("Sidebar Chest"));
             };
             ((BackpackPanelMenuAccess)source.getMenu()).totem$selectBackpackSlot(40);
@@ -117,8 +130,8 @@ public final class ObserverRemnantSidebarE2eBridge implements ClientModInitializ
         }
         if(saved&&!ObserverOwnedScreenCoordinator.isActive("remnant_sidebar",variant,1)&&client.gui.screen()==null) {
             mark("observer-sidebar-"+key()+"-closed.txt","Target close ended native owner view");phase++;saved=false;screenshotRequested=false;
-            if(phase==8) {
-                mark("observer-native-remnant-backpack-closed.txt","Backpack variants and all8 real-capture sidebar variants passed");
+            if(phase==VARIANTS.length*2) {
+                mark("observer-native-remnant-backpack-closed.txt","Backpack variants and all32 real-capture sidebar variants passed");
                 var field=ObserverE2eClient.class.getDeclaredField("observerStopRequested");field.setAccessible(true);field.setBoolean(null,false);
             }
         }

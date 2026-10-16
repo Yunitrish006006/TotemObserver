@@ -92,6 +92,7 @@ public final class ObserverLoomScreenClient {
     private static void tickTarget(Minecraft minecraft) {
         boolean supported = ObserverNativeClient.targetSupportsScreen(ObserverLoomScreenPayloads.CAPABILITY);
         Screen current = minecraft.gui.screen();
+        if (ObserverOwnedScreenTransportClient.ownsTargetScreen(current)) { closeTarget(supported); return; }
         if (!supported || !(current instanceof LoomScreen screen)) {
             closeTarget(supported);
             return;
@@ -144,7 +145,7 @@ public final class ObserverLoomScreenClient {
 
     private static List<ObserverNativeScreenPayloads.SlotState> captureSlots(LoomMenu menu) {
         List<ObserverNativeScreenPayloads.SlotState> slots = new ArrayList<>();
-        int limit = Math.min(menu.slots.size(), ObserverNativeScreenPayloads.MAX_SLOTS);
+        int limit = Math.min(ObserverVanillaSlotBoundary.count(menu), ObserverNativeScreenPayloads.MAX_SLOTS);
         for (int i = 0; i < limit; i++) {
             Slot slot = menu.slots.get(i);
             ItemStack stack = slot.getItem();

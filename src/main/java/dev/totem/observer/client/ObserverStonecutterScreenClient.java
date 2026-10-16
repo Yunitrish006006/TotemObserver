@@ -71,6 +71,7 @@ public final class ObserverStonecutterScreenClient {
     private static void tickTarget(Minecraft minecraft) {
         boolean supported = ObserverNativeClient.targetSupportsScreen(ObserverStonecutterScreenPayloads.CAPABILITY);
         Screen screen = minecraft.gui.screen();
+        if (ObserverOwnedScreenTransportClient.ownsTargetScreen(screen)) { closeTarget(supported); return; }
         if (!supported || !(screen instanceof StonecutterScreen stonecutterScreen)) {
             closeTarget(supported);
             return;
@@ -130,7 +131,7 @@ public final class ObserverStonecutterScreenClient {
 
     private static List<ObserverNativeScreenPayloads.SlotState> captureSlots(StonecutterMenu menu) {
         List<ObserverNativeScreenPayloads.SlotState> slots = new ArrayList<>();
-        int limit = Math.min(menu.slots.size(), ObserverNativeScreenPayloads.MAX_SLOTS);
+        int limit = Math.min(ObserverVanillaSlotBoundary.count(menu), ObserverNativeScreenPayloads.MAX_SLOTS);
         for (int i = 0; i < limit; i++) {
             Slot slot = menu.slots.get(i);
             ItemStack stack = slot.getItem();

@@ -1,0 +1,12 @@
+{
+  "version": "0.1.7",
+  "java": 25,
+  "minecraft": "26.3",
+  "artifact": "totem-observer-0.1.7.jar",
+  "sha512": "36cbd8326de94a6eacdda1bc20423f8fc342a46da44a0c1e092ce3781c469c8ae76057b59e98dd809f8362e351139869b84763badde63a46a0cff835c895a0ff",
+  "core_version": "0.7.23",
+  "core_source_commit": "424b90dc3929caa8c1afcfca7e63c50a64bde669",
+  "core_artifact_sha512": "c3d2f88252ee23500d91f7d49a742f47ae981f25acf1e3cdfcf76c81aa36319943ea92f7aa0a7caf1685d89cb765a1e83ac6a0ee1f1af00cec9ea071cdbe923d",
+  "validation_scope": "Production classes byte-identical to the final unit/build and scoped32-case three-JVM owner-UI tested candidate. Paired Remnant83-server,32-client present/absent and persistence evidence retained. Previous local account-v1 admission1008 remains separate; all3full exact-source CI gates are mandatory before upload. Integration pins use Remnant0.2.29 source 82ba009be7f97ef7b27b84be379356a92db37e3a.",
+  "independent_review": "Native ownership/slot boundaries and bounded E2E timeout fixture independently reviewed without blockers; final metadata/pin/artifact identity review required before push."
+}

@@ -34,7 +34,10 @@ public final class ObserverE2eClient implements ClientModInitializer {
     private static final Class<?> NATIVE_HUD = ObserverNativeHud.class;
     private static final Class<?> NATIVE_SCREEN_CLIENT = ObserverNativeScreenClient.class;
 
-    private static final int CLIENT_TIMEOUT_TICKS = 20 * 180;
+    // The original fixture budget included8 sidebars. Allow5 seconds per added
+    // ordinary/death case while retaining a bounded timeout and every assertion.
+    private static final int CLIENT_TIMEOUT_TICKS = 20 * (180
+            + 5 * Math.max(0, ObserverRemnantSidebarE2eBridge.caseCount() - 8));
     private static final int MAX_CONNECTION_ATTEMPTS = 5;
     private static final int RECONNECT_DELAY_TICKS = 20 * 2;
     private static final int INITIAL_CONNECTION_DELAY_TICKS = 20 * 10;

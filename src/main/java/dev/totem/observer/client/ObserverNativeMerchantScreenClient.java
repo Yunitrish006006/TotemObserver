@@ -99,6 +99,7 @@ public final class ObserverNativeMerchantScreenClient {
     private static void tickTarget(Minecraft minecraft) {
         boolean supported = ObserverNativeClient.targetSupportsScreen(ObserverNativeScreenPayloads.CAPABILITY_MERCHANT);
         Screen screen = minecraft.gui.screen();
+        if (ObserverOwnedScreenTransportClient.ownsTargetScreen(screen)) { closeTarget(supported); return; }
         if (!supported || !(screen instanceof MerchantScreen merchantScreen)) {
             closeTarget(supported);
             return;

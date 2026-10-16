@@ -57,7 +57,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: Yunitrish006006/TotemRemnant
-          ref: c73906aa1b55c90b453f961e22967b4c623b85d0
+          ref: 82ba009be7f97ef7b27b84be379356a92db37e3a
           path: .lockstep/TotemRemnant
           persist-credentials: false
 
@@ -108,7 +108,7 @@ jobs:
           core_jar="${GITHUB_WORKSPACE}/.lockstep/TotemCore/build/libs/totem-core-0.7.23.jar"
           ./gradlew \
             -PtotemCoreJar="$core_jar" \
-            -PtotemRemnantJar="${GITHUB_WORKSPACE}/.lockstep/TotemRemnant/build/libs/totem-remnant-0.2.28.jar" \
+            -PtotemRemnantJar="${GITHUB_WORKSPACE}/.lockstep/TotemRemnant/build/libs/totem-remnant-0.2.29.jar" \
             -PtotemAutomataJar="${GITHUB_WORKSPACE}/.lockstep/TotemAutomata/build/libs/totem-automata-0.1.28.jar" \
             -PtotemNexusJar="${GITHUB_WORKSPACE}/.lockstep/TotemNexus/build/libs/totem-nexus-0.3.25.jar" \
             -PtotemVillagersJar="${GITHUB_WORKSPACE}/.lockstep/TotemVillagers/build/libs/totem-villagers-0.1.39.jar" \
@@ -129,7 +129,7 @@ jobs:
           core_jar="${GITHUB_WORKSPACE}/.lockstep/TotemCore/build/libs/totem-core-0.7.23.jar"
           bash .github/scripts/run-glx-client.sh ./gradlew \
             -PtotemCoreJar="$core_jar" \
-            -PtotemRemnantJar="${GITHUB_WORKSPACE}/.lockstep/TotemRemnant/build/libs/totem-remnant-0.2.28.jar" \
+            -PtotemRemnantJar="${GITHUB_WORKSPACE}/.lockstep/TotemRemnant/build/libs/totem-remnant-0.2.29.jar" \
             -PtotemAutomataJar="${GITHUB_WORKSPACE}/.lockstep/TotemAutomata/build/libs/totem-automata-0.1.28.jar" \
             -PtotemNexusJar="${GITHUB_WORKSPACE}/.lockstep/TotemNexus/build/libs/totem-nexus-0.3.25.jar" \
             -PtotemVillagersJar="${GITHUB_WORKSPACE}/.lockstep/TotemVillagers/build/libs/totem-villagers-0.1.39.jar" \

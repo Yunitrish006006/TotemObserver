@@ -45,7 +45,7 @@ assert_production_jar() {
 
 assert_checkout TotemCore 424b90dc3929caa8c1afcfca7e63c50a64bde669 0.7.23
 assert_checkout TotemExcavation 87bc24076b9fb6fe3a64504f7b638d4ec0767c7c 0.1.16
-assert_checkout TotemRemnant c73906aa1b55c90b453f961e22967b4c623b85d0 0.2.28
+assert_checkout TotemRemnant 82ba009be7f97ef7b27b84be379356a92db37e3a 0.2.29
 assert_checkout TotemAutomata a5532acbd0146e35f08a7e8ecd110a0a78e27b6c 0.1.28
 assert_checkout TotemNexus 5e61897005c79082d20b5d0c318e85a26dc6c688 0.3.25
 assert_checkout TotemVillagers e264484bae4772bb949d74b5788b30f4154668e4 0.1.39
@@ -62,8 +62,8 @@ assert_production_jar "$excavation_jar" totem-excavation 0.1.16
 
 "$wrapper" -p "$lockstep_root/TotemRemnant" \
   -PtotemCoreJar="$core_jar" remapJar --no-daemon --stacktrace
-remnant_jar="$lockstep_root/TotemRemnant/build/libs/totem-remnant-0.2.28.jar"
-assert_production_jar "$remnant_jar" totem-remnant 0.2.28
+remnant_jar="$lockstep_root/TotemRemnant/build/libs/totem-remnant-0.2.29.jar"
+assert_production_jar "$remnant_jar" totem-remnant 0.2.29
 
 "$wrapper" -p "$lockstep_root/TotemAutomata" \
   -PtotemCoreJar="$core_jar" \

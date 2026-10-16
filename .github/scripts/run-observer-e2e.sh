@@ -6,7 +6,7 @@ if [[ -z "${TOTEM_CORE_JAR:-}" ]]; then
 fi
 integration_args=(
   "-PtotemCoreJar=$TOTEM_CORE_JAR"
-  "-PtotemRemnantJar=${TOTEM_REMNANT_JAR:-${GITHUB_WORKSPACE}/.lockstep/TotemRemnant/build/libs/totem-remnant-0.2.28.jar}"
+  "-PtotemRemnantJar=${TOTEM_REMNANT_JAR:-${GITHUB_WORKSPACE}/.lockstep/TotemRemnant/build/libs/totem-remnant-0.2.29.jar}"
   "-PtotemAutomataJar=${TOTEM_AUTOMATA_JAR:-${GITHUB_WORKSPACE}/.lockstep/TotemAutomata/build/libs/totem-automata-0.1.28.jar}"
   "-PtotemNexusJar=${TOTEM_NEXUS_JAR:-${GITHUB_WORKSPACE}/.lockstep/TotemNexus/build/libs/totem-nexus-0.3.25.jar}"
   "-PtotemVillagersJar=${TOTEM_VILLAGERS_JAR:-${GITHUB_WORKSPACE}/.lockstep/TotemVillagers/build/libs/totem-villagers-0.1.39.jar}"

@@ -155,6 +155,7 @@ public final class ObserverBrewingScreenClient {
     private static void tickTarget(Minecraft minecraft) {
         boolean supported = ObserverNativeClient.targetSupportsScreen(ObserverBrewingScreenPayloads.CAPABILITY);
         Screen screen = minecraft.gui.screen();
+        if (ObserverOwnedScreenTransportClient.ownsTargetScreen(screen)) { closeTarget(supported); return; }
         if (!supported || !(screen instanceof BrewingStandScreen brewingScreen)) {
             closeTarget(supported);
             return;
@@ -196,7 +197,7 @@ public final class ObserverBrewingScreenClient {
 
     private static List<ObserverNativeScreenPayloads.SlotState> captureSlots(AbstractContainerMenu menu) {
         List<ObserverNativeScreenPayloads.SlotState> slots = new ArrayList<>();
-        int limit = Math.min(menu.slots.size(), ObserverNativeScreenPayloads.MAX_SLOTS);
+        int limit = Math.min(ObserverVanillaSlotBoundary.count(menu), ObserverNativeScreenPayloads.MAX_SLOTS);
         for (int i = 0; i < limit; i++) {
             Slot slot = menu.slots.get(i);
             ItemStack stack = slot.getItem();
