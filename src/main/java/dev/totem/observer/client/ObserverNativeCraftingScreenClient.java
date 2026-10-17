@@ -145,6 +145,9 @@ public final class ObserverNativeCraftingScreenClient {
     private static void tickTarget(Minecraft minecraft) {
         boolean supported = ObserverNativeClient.targetSupportsScreen(ObserverNativeScreenPayloads.CAPABILITY_CRAFTING);
         Screen screen = minecraft.gui.screen();
+        if (ObserverOwnedScreenTransportClient.ownsTargetScreen(screen)) {
+            closeTarget(supported); return;
+        }
         if (!supported || !isTargetCraftingScreen(screen)) {
             closeTarget(supported);
             return;
@@ -272,7 +275,7 @@ public final class ObserverNativeCraftingScreenClient {
         List<ObserverNativeScreenPayloads.SlotState> slots = new ArrayList<>();
         int maxX = 0;
         int maxY = 0;
-        int limit = Math.min(menu.slots.size(), ObserverNativeScreenPayloads.MAX_SLOTS);
+        int limit = Math.min(ObserverVanillaSlotBoundary.count(menu), ObserverNativeScreenPayloads.MAX_SLOTS);
         for (int i = 0; i < limit; i++) {
             Slot slot = menu.slots.get(i);
             ItemStack stack = slot.getItem();

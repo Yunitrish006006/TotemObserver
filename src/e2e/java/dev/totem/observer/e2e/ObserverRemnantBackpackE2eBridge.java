@@ -29,6 +29,11 @@ public final class ObserverRemnantBackpackE2eBridge implements ClientModInitiali
     private static boolean targetOpened;
     private static boolean targetClosed;
     private static long targetSequence;
+    private static boolean deathSeen;
+    private static volatile boolean deathSaved;
+    private static boolean deathOpened;
+    private static boolean deathCloseSent;
+    private static boolean deathClosed;
 
     @Override
     public void onInitializeClient() {
@@ -38,8 +43,13 @@ public final class ObserverRemnantBackpackE2eBridge implements ClientModInitiali
     }
 
     private static void tick(Minecraft minecraft) {
-        if ("observer".equals(role)) tickObserver(minecraft);
-        else if ("target".equals(role)) tickTarget();
+        if ("observer".equals(role)) {
+            tickObserver(minecraft);
+            tickDeathObserver(minecraft);
+        } else if ("target".equals(role)) {
+            tickTarget();
+            tickDeathTarget();
+        }
     }
 
     private static void tickObserver(Minecraft minecraft) {
@@ -85,10 +95,68 @@ public final class ObserverRemnantBackpackE2eBridge implements ClientModInitiali
                 "remnant_backpack", "", 1)
                 && minecraft.gui.screen() == null) {
             observerClosed = true;
-            ObserverE2eCommon.marker("observer-native-remnant-backpack-closed.txt",
+            ObserverE2eCommon.marker("observer-native-remnant-backpack-ordinary-closed.txt",
                     "Remnant backpack semantic view closed after Target close state.\n");
-            setBoolean(DRIVER, "observerStopRequested", false);
         }
+    }
+
+    private static void tickDeathObserver(Minecraft minecraft) {
+        if (!observerClosed || deathClosed) return;
+        if (!deathSeen && minecraft.gui.screen() instanceof dev.totem.remnant.client.screen.BackpackScreen screen
+                && screen.getMenu().isDeathBackpack()
+                && dev.totem.observer.client.ObserverOwnedScreenCoordinator.hasRemoteCursor()
+                && dev.totem.observer.client.ObserverOwnedScreenCoordinator.hasRenderedActiveSnapshot()) {
+            if (!screen.totem$isObserverReadOnly() || screen.getMenu().getSlot(0).getItem().getCount() != 13
+                    || screen.getMenu().upgradeSlotCount() != 0 || screen.equipButton() == null
+                    || screen.equipButton().active || screen.getMenu().getCarried().getCount() != 5) {
+                fail("Death backpack did not apply its later snapshot and read-only equipment UI");
+                return;
+            }
+            deathSeen = true;
+            ObserverE2eCommon.marker("observer-native-remnant-death-ok.txt",
+                    "Death production Screen applied later state, remote cursor and disabled equip.\n");
+            Screenshot.takeScreenshot(minecraft.gameRenderer.mainRenderTarget(), image -> {
+                if (image == null) { fail("Death screenshot callback returned null"); return; }
+                try (NativeImage owned = image) {
+                    owned.writeToFile(ObserverE2eCommon.resultsDir().resolve("observer-native-remnant-death.png"));
+                    deathSaved = true;
+                    ObserverE2eCommon.marker("observer-native-remnant-death-saved.txt", "Death screenshot saved locally.\n");
+                } catch (Exception error) { fail("Death screenshot failed: " + error); }
+            });
+        }
+        if (deathSeen && deathSaved
+                && !dev.totem.observer.client.ObserverOwnedScreenCoordinator.isActive("remnant_backpack", "death", 1)
+                && minecraft.gui.screen() == null) {
+            deathClosed = true;
+            ObserverE2eCommon.marker("observer-native-remnant-death-closed.txt", "Death view closed after Target close.\n");
+            if (!ObserverRemnantSidebarE2eBridge.enabled()) {
+                ObserverE2eCommon.marker("observer-native-remnant-backpack-closed.txt", "Both backpack variants closed.\n");
+                setBoolean(DRIVER, "observerStopRequested", false);
+            }
+        }
+    }
+
+    private static void tickDeathTarget() {
+        if (targetClosed && !deathOpened && markerExists("observer-native-remnant-backpack-ordinary-closed.txt")) {
+            deathOpened = true;
+            ClientPlayNetworking.send(deathState(++targetSequence, 12));
+            ClientPlayNetworking.send(deathState(++targetSequence, 13));
+            ClientPlayNetworking.send(ObserverOwnedE2eSnapshots.namedCursor("remnant_backpack", "death", 2L));
+            ObserverE2eCommon.marker("target-native-remnant-death-state-sent.txt", "Death initial/update/cursor sent.\n");
+        }
+        if (deathOpened && !deathCloseSent && markerExists("observer-native-remnant-death-saved.txt")) {
+            deathCloseSent = true;
+            ClientPlayNetworking.send(ObserverOwnedE2eSnapshots.close("remnant_backpack", "death", ++targetSequence));
+            ObserverE2eCommon.marker("target-native-remnant-death-close-sent.txt", "Death close sent.\n");
+        }
+    }
+
+    private static dev.totem.observer.network.ObserverOwnedScreenPayloads.State deathState(long sequence, int diamonds) {
+        var slots = new ArrayList<net.minecraft.world.item.ItemStack>();
+        for (int i = 0; i < 63; i++) slots.add(net.minecraft.world.item.ItemStack.EMPTY);
+        slots.set(0, new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.DIAMOND, diamonds));
+        return ObserverOwnedE2eSnapshots.open("remnant_backpack", "death", sequence, "Death Backpack", slots,
+                new int[]{3, 0}, java.util.Map.of(), new byte[0]);
     }
 
     private static void tickTarget() {

@@ -79,7 +79,8 @@ public final class ObserverCraftingE2eBridge implements ClientModInitializer {
         int gridWidth = getInt(CRAFTING, "remoteGridWidth");
         int gridHeight = getInt(CRAFTING, "remoteGridHeight");
         int remoteSlotCount = getListSize(CRAFTING, "remoteSlots");
-        int productionSlotCount = ((InventoryScreen) minecraft.gui.screen()).getMenu().slots.size();
+        int productionSlotCount = dev.totem.observer.client.ObserverVanillaSlotBoundary.count(
+                ((InventoryScreen) minecraft.gui.screen()).getMenu());
         if (!"player_2x2".equals(variant) || gridWidth != 2 || gridHeight != 2
                 || remoteSlotCount < 46 || remoteSlotCount != productionSlotCount) {
             fail("Unexpected Inventory crafting semantic state: variant=" + variant
