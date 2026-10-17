@@ -22,7 +22,9 @@ final class ObserverNexusTerrainFixture {
         units.put(new NexusSpaceUnitRecord(source,SpaceUnitType.LODESTONE,level.dimension(),anchor,target.getUUID(),
                 "E2E terrain",SpaceUnitVisibility.PUBLIC,SpaceUnitStatus.ACTIVE,Set.of(),Set.of(),
                 SpaceStructureSnapshot.EMPTY,0,0));
-        var data=dev.totem.nexus.mixin.NexusMapItemSavedDataInvoker.totem$createExact(10,10,(byte)2,false,false,false,level.dimension());
+        // Terrain is supplied below. A live scale-2 map would synchronously
+        // generate distant chunks from inventoryTick before UI checks begin.
+        var data=dev.totem.nexus.mixin.NexusMapItemSavedDataInvoker.totem$createExact(10,10,(byte)2,false,false,true,level.dimension());
         java.util.Arrays.fill(data.colors,MapColor.GRASS.getPackedId(MapColor.Brightness.NORMAL));
         var id=new MapId(8801); level.setMapData(id,data);
         level.getServer().overworld().getDataStorage().computeIfAbsent(NexusMapBindingSavedData.TYPE)

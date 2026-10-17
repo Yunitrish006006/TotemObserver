@@ -282,6 +282,9 @@ public final class ObserverNativeScreenClient {
                 ObserverNativeScreenPayloads.CAPABILITY_REMNANT_BACKPACK
         );
 
+        if (ObserverOwnedScreenTransportClient.ownsTargetScreen(screen)) {
+            closeTargetFurnace(supportsFurnace); closeTargetContainer(supportsContainer); return;
+        }
         if (supportsRemnantBackpack && screen != null
                 && REMNANT_BACKPACK_SCREEN_CLASS.equals(screen.getClass().getName())) {
             closeTargetFurnace(supportsFurnace);
@@ -444,7 +447,7 @@ public final class ObserverNativeScreenClient {
         int maxX = 0;
         int maxY = 0;
         int slotLimit = Math.min(
-                menu.slots.size(),
+                ObserverVanillaSlotBoundary.count(menu),
                 ObserverNativeScreenPayloads.MAX_SLOTS
         );
         for (int i = 0; i < slotLimit; i++) {

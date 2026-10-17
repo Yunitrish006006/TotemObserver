@@ -2,7 +2,9 @@ package dev.totem.observer.mixin.client;
 
 import net.minecraft.client.gui.screens.inventory.AbstractSignEditScreen;
 import net.minecraft.world.level.block.entity.SignText;
+import net.minecraft.world.level.block.entity.SignTextSlot;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Mutable;
 import org.spongepowered.asm.mixin.gen.Accessor;
 
 /** Read-only access to the current client-side Sign editor state. */
@@ -11,8 +13,8 @@ public interface AbstractSignEditScreenAccessor {
     @Accessor("messages")
     String[] totem$getMessages();
 
-    @Accessor("isFrontText")
-    boolean totem$isFrontText();
+    @Accessor("slot")
+    SignTextSlot totem$getSlot();
 
     @Accessor("line")
     int totem$getLine();
@@ -21,8 +23,12 @@ public interface AbstractSignEditScreenAccessor {
     void totem$setLine(int value);
 
     @Accessor("text")
-    SignText totem$getText();
+    SignText.Mutable totem$getText();
 
-    @Accessor("text")
-    void totem$setText(SignText value);
+    @Accessor("textColor")
+    int totem$getTextColor();
+
+    @Mutable
+    @Accessor("textColor")
+    void totem$setTextColor(int value);
 }

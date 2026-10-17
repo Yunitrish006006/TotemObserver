@@ -1,16 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export SDL_VIDEO_DRIVER=x11
+export VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.json
+export VK_ICD_FILENAMES="$VK_DRIVER_FILES"
 if [[ -z "${TOTEM_CORE_JAR:-}" ]]; then
   core_version="$(sed -n 's/^mod_version=//p' .lockstep/TotemCore/gradle.properties)"
   TOTEM_CORE_JAR="${GITHUB_WORKSPACE}/.lockstep/TotemCore/build/libs/totem-core-${core_version}.jar"
 fi
 integration_args=(
   "-PtotemCoreJar=$TOTEM_CORE_JAR"
-  "-PtotemRemnantJar=${TOTEM_REMNANT_JAR:-${GITHUB_WORKSPACE}/.lockstep/TotemRemnant/build/libs/totem-remnant-0.2.21.jar}"
-  "-PtotemAutomataJar=${TOTEM_AUTOMATA_JAR:-${GITHUB_WORKSPACE}/.lockstep/TotemAutomata/build/libs/totem-automata-0.1.24.jar}"
-  "-PtotemNexusJar=${TOTEM_NEXUS_JAR:-${GITHUB_WORKSPACE}/.lockstep/TotemNexus/build/libs/totem-nexus-0.3.23.jar}"
-  "-PtotemVillagersJar=${TOTEM_VILLAGERS_JAR:-${GITHUB_WORKSPACE}/.lockstep/TotemVillagers/build/libs/totem-villagers-0.1.36.jar}"
-  "-PtotemLocksmithJar=${TOTEM_LOCKSMITH_JAR:-${GITHUB_WORKSPACE}/.lockstep/TotemLocksmith/build/libs/totem-locksmith-0.1.10.jar}"
+  "-PtotemRemnantJar=${TOTEM_REMNANT_JAR:-${GITHUB_WORKSPACE}/.lockstep/TotemRemnant/build/libs/totem-remnant-0.2.27.jar}"
+  "-PtotemAutomataJar=${TOTEM_AUTOMATA_JAR:-${GITHUB_WORKSPACE}/.lockstep/TotemAutomata/build/libs/totem-automata-0.1.28.jar}"
+  "-PtotemNexusJar=${TOTEM_NEXUS_JAR:-${GITHUB_WORKSPACE}/.lockstep/TotemNexus/build/libs/totem-nexus-0.3.25.jar}"
+  "-PtotemVillagersJar=${TOTEM_VILLAGERS_JAR:-${GITHUB_WORKSPACE}/.lockstep/TotemVillagers/build/libs/totem-villagers-0.1.39.jar}"
+  "-PtotemLocksmithJar=${TOTEM_LOCKSMITH_JAR:-${GITHUB_WORKSPACE}/.lockstep/TotemLocksmith/build/libs/totem-locksmith-0.1.13.jar}"
 )
 if [[ -n "${TOTEM_GRADLE_INIT_SCRIPT:-}" ]]; then
   integration_args+=(--init-script "$TOTEM_GRADLE_INIT_SCRIPT")
@@ -120,7 +123,7 @@ fi
 
 (
   cd build/e2e/target
-  exec xvfb-run -a "$java_bin" @"$target_args" \
+  TOTEM_GLX_DISPLAY=:99 bash "$GITHUB_WORKSPACE/.github/scripts/run-glx-client.sh" "$java_bin" @"$target_args" \
     -Dfabric.dli.config="$launch_cfg" \
     -Dfabric.dli.env=client \
     -Dfabric.dli.main=net.fabricmc.loader.impl.launch.knot.KnotClient \
@@ -130,7 +133,7 @@ fi
     --sun-misc-unsafe-memory-access=allow \
     --enable-native-access=ALL-UNNAMED \
     -Dfile.encoding=UTF-8 \
-    net.fabricmc.devlaunchinjector.Main --username Target
+    net.fabricmc.devlaunchinjector.Main --username Target --graphicsBackend OPENGL
 ) > build/e2e/target.log 2>&1 &
 target_pid=$!
 
@@ -138,7 +141,7 @@ target_pid=$!
 # Gradle/Loom preparation completed before the first client can join.
 (
   cd build/e2e/observer
-  exec xvfb-run -a "$java_bin" @"$observer_args" \
+  TOTEM_GLX_DISPLAY=:100 bash "$GITHUB_WORKSPACE/.github/scripts/run-glx-client.sh" "$java_bin" @"$observer_args" \
     -Dfabric.dli.config="$launch_cfg" \
     -Dfabric.dli.env=client \
     -Dfabric.dli.main=net.fabricmc.loader.impl.launch.knot.KnotClient \
@@ -148,7 +151,7 @@ target_pid=$!
     --sun-misc-unsafe-memory-access=allow \
     --enable-native-access=ALL-UNNAMED \
     -Dfile.encoding=UTF-8 \
-    net.fabricmc.devlaunchinjector.Main --username Observer
+    net.fabricmc.devlaunchinjector.Main --username Observer --graphicsBackend OPENGL
 ) > build/e2e/observer.log 2>&1 &
 observer_pid=$!
 

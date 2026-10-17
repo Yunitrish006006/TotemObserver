@@ -22,10 +22,11 @@ public final class ObserverAdvancementsClientGameTest implements FabricClientGam
     public void runTest(ClientGameTestContext context) {
         try (TestSingleplayerContext singleplayer = context.worldBuilder().create()) {
             context.waitTicks(2);
-            singleplayer.getClientLevel().waitForChunksRender();
+            singleplayer.getConnection().waitForChunksRender();
             UUID targetId = UUID.randomUUID();
             context.runOnClient(minecraft -> {
-                applySession(true, targetId, ObserverAdvancementsScreenPayloads.CAPABILITY);
+                applySession(true, targetId, ObserverAdvancementsScreenPayloads.CAPABILITY
+                        | dev.totem.observer.network.ObserverRemoteCursorPayloads.CAPABILITY);
                 accept(ObserverAdvancementsScreenPayloads.relay(targetId, openState(1L)));
             });
             context.waitFor(minecraft -> minecraft.gui.screen() != null
@@ -40,8 +41,9 @@ public final class ObserverAdvancementsClientGameTest implements FabricClientGam
             }
             persistForCi(context.takeScreenshot("observer-ui-native-advancements-screen"),
                     "observer-ui-native-advancements-screen.png");
+            context.runOnClient(minecraft -> assertProductionViewportAndHover(minecraft, targetId));
             context.runOnClient(minecraft -> {
-                accept(ObserverAdvancementsScreenPayloads.relay(targetId, ObserverAdvancementsScreenPayloads.closed(2L)));
+                accept(ObserverAdvancementsScreenPayloads.relay(targetId, ObserverAdvancementsScreenPayloads.closed(3L)));
                 applySession(false, new UUID(0L, 0L), 0L);
             });
             context.waitForScreen(null);
@@ -70,6 +72,76 @@ public final class ObserverAdvancementsClientGameTest implements FabricClientGam
                                 "minecraft:story/upgrade_tools", "minecraft:story/root", "minecraft:story/mine_stone", "Getting an Upgrade", "Construct a better pickaxe",
                                 "minecraft:stone_pickaxe", "task", 3.0F, 0.0F, 0.5F, false, false)
                 ));
+    }
+
+    private static void assertProductionViewportAndHover(net.minecraft.client.Minecraft minecraft, UUID targetId) {
+        var screen = (net.minecraft.client.gui.screens.advancements.AdvancementsScreen) minecraft.gui.screen();
+        var accessor = (dev.totem.observer.mixin.client.AdvancementsScreenAccessor) screen;
+        var tab = accessor.totem$getSelectedTab();
+        var viewport = (dev.totem.observer.mixin.client.AdvancementTabAccessor) tab;
+        if (viewport.totem$getScrollX() != -14.0D || viewport.totem$getScrollY() != 9.0D) {
+            throw new AssertionError("Vanilla rendering overwrote the authoritative viewport");
+        }
+        var manager = accessor.totem$getAdvancements();
+        var node = manager.tree().get(net.minecraft.resources.Identifier.parse("minecraft:story/mine_stone"));
+        if (node == null || node.x() != 1.5F || node.y() != 0.0F) {
+            throw new AssertionError("Production advancement tree lost positioned coordinates");
+        }
+        var widget = screen.getAdvancementWidget(node);
+        int widgetX = ((Number) instanceField(widget, "x")).intValue();
+        int widgetY = ((Number) instanceField(widget, "y")).intValue();
+        float cursorX = accessor.totem$getLeftPos() + 9 + widgetX - 14 + 8;
+        float cursorY = accessor.totem$getTopPos() + 18 + widgetY + 9 + 8;
+        receiveCursor(targetId, screen, 10L, cursorX, cursorY);
+        screen.tick();
+        if (instanceField(tab, "hovered") != widget) {
+            throw new AssertionError("Vanilla advancement hover did not follow remote cursor");
+        }
+        Object fade = instanceField(tab, "fade");
+        accept(ObserverAdvancementsScreenPayloads.relay(targetId, openState(2L)));
+        if (accessor.totem$getSelectedTab() != tab || instanceField(tab, "hovered") != widget
+                || !fade.equals(instanceField(tab, "fade"))) {
+            throw new AssertionError("Identical accepted snapshot reset production hover or fade");
+        }
+        invoke(ObserverAdvancementsScreenClient.class, "ensureObserverScreen", new Class<?>[]{});
+        if (accessor.totem$getSelectedTab() != tab || instanceField(tab, "hovered") != widget) {
+            throw new AssertionError("Unchanged relay rebuilt the hovered production tab during lifecycle maintenance");
+        }
+        receiveCursor(targetId, screen, 10L, 0, 0);
+        screen.tick();
+        if (instanceField(tab, "hovered") != widget) {
+            throw new AssertionError("Duplicate cursor sequence replaced the accepted cursor");
+        }
+        receiveCursor(targetId, screen, 9L, 0, 0);
+        screen.tick();
+        if (instanceField(tab, "hovered") != widget) {
+            throw new AssertionError("Decreasing cursor sequence replaced the accepted cursor");
+        }
+        receiveCursor(targetId, screen, 11L, 0, 0);
+        screen.tick();
+        if (instanceField(tab, "hovered") != null) {
+            throw new AssertionError("Advancement hover retained a stale remote cursor target");
+        }
+    }
+
+    private static void receiveCursor(UUID targetId, net.minecraft.client.gui.screens.Screen screen, long sequence, float cursorX, float cursorY) {
+        var identity = dev.totem.observer.client.ObserverVanillaScreenIdentity.classifyObserver(screen).orElseThrow();
+        var payload = new dev.totem.observer.network.ObserverRemoteCursorPayloads.Relay(
+                targetId, dev.totem.observer.network.ObserverRemoteCursorPayloads.PROTOCOL_VERSION,
+                sequence, identity.family(), identity.variant(), identity.protocol(), cursorX, cursorY,
+                screen.width, screen.height, net.minecraft.world.item.ItemStack.EMPTY);
+        invoke(dev.totem.observer.client.ObserverOwnedScreenTransportClient.class, "acceptCursor",
+                new Class<?>[]{dev.totem.observer.network.ObserverRemoteCursorPayloads.Relay.class}, payload);
+    }
+
+    private static Object instanceField(Object owner, String name) {
+        try {
+            Field field = owner.getClass().getDeclaredField(name);
+            field.setAccessible(true);
+            return field.get(owner);
+        } catch (ReflectiveOperationException error) {
+            throw new RuntimeException(error);
+        }
     }
 
     private static void accept(ObserverAdvancementsScreenPayloads.AdvancementsRelay relay) {

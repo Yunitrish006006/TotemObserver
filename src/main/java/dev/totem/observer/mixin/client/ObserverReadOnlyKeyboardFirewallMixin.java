@@ -9,7 +9,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.input.CharacterEvent;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.PreeditEvent;
-import org.lwjgl.glfw.GLFW;
+import com.mojang.blaze3d.platform.InputConstants;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -25,7 +25,7 @@ public abstract class ObserverReadOnlyKeyboardFirewallMixin {
     @Inject(method = "keyPress", at = @At("HEAD"), cancellable = true)
     private void totem$blockObserverKey(long window, int action, KeyEvent event, CallbackInfo ci) {
         if (!ObserverNativeClient.observerSessionActive() && !ObserverOwnedScreenCoordinator.isReadOnlyObserverScreen(minecraft.gui.screen())) return;
-        if (action == GLFW.GLFW_PRESS && event.key() == GLFW.GLFW_KEY_ESCAPE) {
+        if (action == InputConstants.PRESS && event.key() == InputConstants.KEY_ESCAPE) {
             if (ObserverNativeClient.observerSessionActive()) ClientPlayNetworking.send(new ObserverPayloads.Stop());
             else minecraft.gui.screen().onClose();
         }
@@ -37,7 +37,7 @@ public abstract class ObserverReadOnlyKeyboardFirewallMixin {
         if (ObserverNativeClient.observerSessionActive() || ObserverOwnedScreenCoordinator.isReadOnlyObserverScreen(minecraft.gui.screen())) ci.cancel();
     }
 
-    @Inject(method = "preeditCallback", at = @At("HEAD"), cancellable = true)
+    @Inject(method = "textEditing", at = @At("HEAD"), cancellable = true)
     private void totem$blockObserverPreedit(long window, PreeditEvent event, CallbackInfo ci) {
         if (ObserverNativeClient.observerSessionActive() || ObserverOwnedScreenCoordinator.isReadOnlyObserverScreen(minecraft.gui.screen())) ci.cancel();
     }

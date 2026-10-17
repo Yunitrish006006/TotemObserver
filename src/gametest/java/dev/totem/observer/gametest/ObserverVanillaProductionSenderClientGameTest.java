@@ -119,7 +119,7 @@ public final class ObserverVanillaProductionSenderClientGameTest implements Fabr
     public void runTest(ClientGameTestContext context) {
         try (TestSingleplayerContext singleplayer = context.worldBuilder().create()) {
             context.waitTicks(2);
-            singleplayer.getClientLevel().waitForChunksRender();
+            singleplayer.getConnection().waitForChunksRender();
             context.runOnClient(minecraft -> {
                 verifyContainerSlots(minecraft);
                 verifyFurnace(minecraft);
@@ -414,7 +414,7 @@ public final class ObserverVanillaProductionSenderClientGameTest implements Fabr
 
     private static void verifySign(Minecraft minecraft) {
         SignBlockEntity sign = new SignBlockEntity(BlockPos.ZERO, Blocks.OAK_SIGN.defaultBlockState());
-        SignEditScreen screen = new SignEditScreen(sign, true, false);
+        SignEditScreen screen = new SignEditScreen(sign, net.minecraft.world.level.block.entity.SignTextSlot.FRONT, false);
         showScreen(minecraft, screen, "sign");
         String[] privateLines = ((AbstractSignEditScreenAccessor) screen).totem$getMessages();
         privateLines[0] = "https://private.example/token";
@@ -440,7 +440,7 @@ public final class ObserverVanillaProductionSenderClientGameTest implements Fabr
 
         HangingSignBlockEntity hangingSign = new HangingSignBlockEntity(
                 BlockPos.ZERO, Blocks.OAK_HANGING_SIGN.defaultBlockState());
-        HangingSignEditScreen hangingScreen = new HangingSignEditScreen(hangingSign, false, false);
+        HangingSignEditScreen hangingScreen = new HangingSignEditScreen(hangingSign, net.minecraft.world.level.block.entity.SignTextSlot.BACK, false);
         showScreen(minecraft, hangingScreen, "hanging sign");
         ObserverSignScreenPayloads.SignState hangingState =
                 (ObserverSignScreenPayloads.SignState) invoke(

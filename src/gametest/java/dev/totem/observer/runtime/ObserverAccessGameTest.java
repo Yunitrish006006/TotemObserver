@@ -168,7 +168,8 @@ public final class ObserverAccessGameTest {
             } catch (net.minecraft.server.RunningOnDifferentThreadException scheduled) { }
             try {
                 player.connection.handleSignUpdate(new net.minecraft.network.protocol.game.ServerboundSignUpdatePacket(
-                        pos, true, "injected", "", "", ""));
+                        pos, java.util.List.of("injected", "", "", ""),
+                        net.minecraft.world.level.block.entity.SignTextSlot.FRONT));
             } catch (net.minecraft.server.RunningOnDifferentThreadException scheduled) { }
         });
         helper.startSequence().thenWaitUntil(() -> {
@@ -178,7 +179,8 @@ public final class ObserverAccessGameTest {
             try {
                 require(helper, book.get(net.minecraft.core.component.DataComponents.WRITABLE_BOOK_CONTENT).pages().isEmpty(),
                         "Async book packet changed inventory");
-                require(helper, sign.getFrontText().getMessage(0, false).getString().isEmpty(),
+                require(helper, sign.getText(net.minecraft.world.level.block.entity.SignTextSlot.FRONT)
+                                .getMessages(false).get(0).getString().isEmpty(),
                         "Async sign packet changed world");
             } finally { ObserverSessionManager.stop(player, true); player.discard(); }
         }).thenSucceed();

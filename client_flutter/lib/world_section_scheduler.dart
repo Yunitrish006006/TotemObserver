@@ -168,11 +168,15 @@ class WorldSectionScheduler extends ChangeNotifier {
       _active = null;
       _pump();
       _notify();
+    } else if (active == null) {
+      _pump();
+      _notify();
     }
   }
 
   void _pump() {
     if (_active != null ||
+        !connection.canSendWorldSectionNow ||
         connection.phase != ConnectionPhase.connected ||
         !connection.canRequestWorldSections ||
         _contextChanged()) {

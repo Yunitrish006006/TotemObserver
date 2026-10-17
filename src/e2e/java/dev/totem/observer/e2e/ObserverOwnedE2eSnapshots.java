@@ -191,7 +191,7 @@ final class ObserverOwnedE2eSnapshots {
                 family, variant, protocol(family), 88, 83, 176, 166, carried);
     }
 
-    private static ObserverOwnedScreenPayloads.State open(String family, String variant, long sequence, String title,
+    static ObserverOwnedScreenPayloads.State open(String family, String variant, long sequence, String title,
                                                            List<ItemStack> slots, int[] data, Map<String, String> metadata,
                                                            byte[] ownerPayload) {
         return new ObserverOwnedScreenPayloads.State(true, new ObserverScreenSnapshot(family, variant,
