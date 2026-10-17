@@ -8,7 +8,7 @@ group = project.maven_group
 base { archivesName = project.archives_base_name }
 
 def totemCoreJar = file(providers.gradleProperty('totemCoreJar')
-        .getOrElse('../TotemCore/build/libs/totem-core-0.7.22.jar'))
+        .getOrElse('../TotemCore/build/libs/totem-core-0.7.23.jar'))
 def observerIntegrationJars = [
         remnant   : file(providers.gradleProperty('totemRemnantJar')
                 .getOrElse('../TotemRemnant/build/libs/totem-remnant-0.2.26.jar')),
@@ -267,9 +267,20 @@ tasks.named('runE2eServer').configure {
         File dir = file('build/e2e/server')
         dir.mkdirs()
         new File(dir, 'eula.txt').text = 'eula=true\n'
+        // Admit only the two Java clients and the account-v1 admission fixture.
+        // Minecraft defaults may enable the whitelist even on a fresh world.
+        def testPlayers = ['Target', 'Observer'].collect { name ->
+            [uuid: UUID.nameUUIDFromBytes("OfflinePlayer:${name}".getBytes('UTF-8')).toString(), name: name]
+        }
+        // Same deterministic identity as ObserverPlayerIdentity.forAccount;
+        // ObserverBridgeAdmissionE2eCoordinator uses this fixed test account.
+        def bridgeId = UUID.nameUUIDFromBytes('totem-observer:external-player:e2e_bridge'.getBytes('UTF-8')).toString()
+        testPlayers.add([uuid: bridgeId, name: 'obs_' + bridgeId.replace('-', '').substring(0, 12)])
+        new File(dir, 'whitelist.json').text = groovy.json.JsonOutput.toJson(testPlayers) + '\n'
         new File(dir, 'server.properties').text = '''server-port=25570
 online-mode=false
 enforce-secure-profile=false
+white-list=true
 spawn-protection=0
 view-distance=2
 simulation-distance=2
